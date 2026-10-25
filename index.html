@@ -1,0 +1,2699 @@
+<!-- ... existing code ... -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    /*for Gemini 4*/
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K-METRO : 한국 도시철도 시뮬레이터</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet Map CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <!-- 외부 분리된 역 데이터베이스 로드 (확장자 실수 대비 이중 로드) -->
+    <script src="./stations-data.js"></script>
+    <script src="./stations-data.js.txt"></script>
+
+    <style>
+        @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+        body {
+            font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+            overflow: hidden;
+            user-select: none;
+            background-color: #f4f1ea;
+            color: #18181b;
+        }
+        #map {
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+            background-color: #e9e5dc;
+            background-image: radial-gradient(#d6d1c4 1px, transparent 1px);
+            background-size: 24px 24px;
+        }
+        .ui-layer { z-index: 1000; pointer-events: none; }
+        .ui-element { pointer-events: auto; }
+
+        /* Mini Metro Style Station Nodes */
+        .station-node {
+            border-radius: 50%;
+            background: #ffffff;
+            border: 3.5px solid #18181b;
+            transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: 900; color: #18181b;
+        }
+        .station-node.locked {
+            background: rgba(24, 24, 27, 0.12);
+            border: 1.5px dashed rgba(24, 24, 27, 0.35);
+            box-shadow: none;
+            color: transparent;
+        }
+        .station-node.locked:hover {
+            transform: scale(1.3);
+            border-color: #18181b;
+            background: rgba(255,255,255,0.85);
+        }
+        .station-node.expandable {
+            background: #fef08a;
+            border: 3px solid #eab308;
+            animation: pulse-yellow 1.3s infinite;
+            cursor: pointer;
+        }
+        .station-node.transfer {
+            border-width: 4px;
+            box-shadow: 0 0 0 2px #ffffff, 0 0 0 4.5px #18181b, 0 4px 10px rgba(0,0,0,0.4);
+        }
+        .station-node.festival {
+            animation: pulse-purple 1s infinite !important;
+            border-color: #d946ef !important;
+            background: #fae8ff !important;
+        }
+        .station-node.danger {
+            animation: pulse-red 0.55s infinite !important;
+            color: #fff !important;
+        }
+
+        /* Train Node & Stopping Effect */
+        .train-node {
+            border-radius: 6px;
+            border: 2px solid #ffffff;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.5);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: 900; color: #ffffff;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .train-node.stopped {
+            transform: scale(1.24);
+            box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.7), 0 4px 12px rgba(0,0,0,0.6);
+        }
+        .train-node.vip {
+            background: linear-gradient(135deg, #f59e0b, #eab308) !important;
+            border-color: #fef08a !important;
+            color: #18181b !important;
+        }
+
+        /* Built Station Permanent Label */
+        .leaflet-tooltip.station-label-built {
+            background: rgba(255, 255, 255, 0.95);
+            border: 1.5px solid #27272a;
+            color: #18181b;
+            font-family: 'Pretendard', sans-serif;
+            font-weight: 800;
+            font-size: 11px;
+            padding: 1.5px 6px;
+            border-radius: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.18);
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip.station-label-hover {
+            background: rgba(24, 24, 27, 0.9);
+            border: none;
+            color: #ffffff;
+            font-family: 'Pretendard', sans-serif;
+            font-weight: 700;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 5px;
+        }
+        .leaflet-tooltip-top:before, .leaflet-tooltip-bottom:before, .leaflet-tooltip-left:before, .leaflet-tooltip-right:before { display: none; }
+
+        /* Floating +Money Animation */
+        .floating-income {
+            font-family: 'Pretendard', sans-serif;
+            font-weight: 900;
+            font-size: 13px;
+            color: #059669;
+            text-shadow: 0 1px 0 #fff, 0 -1px 0 #fff, 1px 0 0 #fff, -1px 0 0 #fff, 0 3px 6px rgba(0,0,0,0.25);
+            animation: float-up 1.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        @keyframes float-up {
+            0% { opacity: 0; transform: translateY(4px) scale(0.7); }
+            20% { opacity: 1; transform: translateY(-6px) scale(1.1); }
+            100% { opacity: 0; transform: translateY(-28px) scale(0.95); }
+        }
+        @keyframes pulse-yellow {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.7); }
+            50% { transform: scale(1.28); box-shadow: 0 0 0 8px rgba(234, 179, 8, 0); }
+        }
+        @keyframes pulse-purple {
+            0%, 100% { transform: scale(1.1); box-shadow: 0 0 0 0 rgba(217, 70, 239, 0.75); }
+            50% { transform: scale(1.38); box-shadow: 0 0 0 10px rgba(217, 70, 239, 0); }
+        }
+        @keyframes pulse-red {
+            0%, 100% { background-color: #ef4444; transform: scale(1.35); }
+            50% { background-color: #7f1d1d; transform: scale(1); }
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); border-radius: 4px; }
+/* 일반지도 모드일 때 눈이 편안하고 노선이 돋보이게 하는 미니메트로 필터 */
+        .clean-map-filter {
+            filter: grayscale(35%) contrast(92%) brightness(103%);
+        }
+/* 공사 중인 역 스타일 (주황색 점멸) */
+        .station-node.constructing {
+            background: #ffedd5 !important;
+            border: 3px dashed #f97316 !important;
+            color: #c2410c !important;
+            animation: pulse-yellow 1s infinite !important;
+        }
+        /* 복합환승센터 설치 역 (초대형 황금 링) */
+        .station-node.hub-center {
+            border-width: 4.5px !important;
+            box-shadow: 0 0 0 3px #fef08a, 0 0 0 6px #ca8a04, 0 6px 16px rgba(202,138,4,0.6) !important;
+            background: #fef9c3 !important;
+        }
+    </style>
+</head>
+<body class="relative">
+
+    <!-- ================= 1. 풀스크린 메인 선택 화면 ================= -->
+    <div id="main-menu" class="fixed inset-0 bg-[#F5F2EB] text-zinc-900 z-[3000] overflow-y-auto flex flex-col justify-between p-6 md:p-12">
+        <div class="max-w-6xl w-full mx-auto">
+            <div class="flex flex-wrap justify-between items-end gap-4 mb-10 border-b border-zinc-300/80 pb-6">
+                <div>
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-zinc-900 text-white text-xs font-extrabold mb-2 tracking-wide">
+                        <i class="fas fa-subway text-amber-400"></i> MINI METRO KOREA EDITION
+                    </div>
+                    <h1 class="text-3xl md:text-4xl font-black tracking-tight text-zinc-900">K-메트로 타이쿤</h1>
+                    <p class="text-sm text-zinc-500 font-medium mt-1">운영할 노선도를 선택하세요. 개통한 정류소는 역 이름이 자동으로 표시되며, 역마다 최대 3개의 저장 슬롯을 지원합니다.</p>
+                </div>
+                <div class="flex items-center gap-2 text-xs font-bold text-zinc-600 bg-[#ebe6dc] px-4 py-2.5 rounded-xl border border-zinc-300">
+                    <i class="fas fa-database text-indigo-600"></i>
+                    <span>역 데이터 연동 완료 (<span id="db-status-count">0</span>개 노선 로드됨)</span>
+                </div>
+            </div>
+
+            <!-- Dynamic Map Cards Container -->
+            <div id="menu-categories" class="flex flex-col gap-10"></div>
+        </div>
+
+        <div class="max-w-6xl w-full mx-auto mt-12 pt-6 border-t border-zinc-300/80 flex flex-wrap justify-between items-center text-xs text-zinc-500 gap-4">
+            <div>💡 <strong>게임 팁:</strong> 첫 노선은 연속된 두 역을 클릭해 무료로 개통합니다. 이후 양끝 노란색 점멸 역을 클릭해 노선을 연장하세요!</div>
+            <div>데이터 분리: <code>stations-data.js</code></div>
+        </div>
+    </div>
+
+    <!-- ================= 2. 저장 슬롯 선택 모달 (0/3 슬롯 지원) ================= -->
+    <div id="slot-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[3500] hidden items-center justify-center p-4">
+        <div class="bg-[#FAF8F5] text-zinc-900 border border-zinc-300 rounded-3xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4">
+            <div class="flex justify-between items-start">
+                <div>
+                    <span id="slot-modal-cat" class="text-xs font-extrabold text-indigo-600">수도권</span>
+                    <h3 id="slot-modal-title" class="text-2xl font-black">서울 올인원</h3>
+                    <p id="slot-modal-sub" class="text-xs text-zinc-500 mt-0.5">새 게임을 시작하거나 저장된 슬롯(최대 3개)을 불러오세요.</p>
+                </div>
+                <button onclick="closeSlotModal()" class="w-8 h-8 rounded-full bg-zinc-200 hover:bg-zinc-300 flex items-center justify-center text-zinc-600"><i class="fas fa-times"></i></button>
+            </div>
+
+            <button onclick="startNewGameFromModal()" class="w-full py-3.5 px-4 rounded-2xl bg-zinc-900 hover:bg-indigo-600 text-white font-extrabold text-sm flex items-center justify-between shadow-lg transition">
+                <span><i class="fas fa-play mr-2 text-amber-400"></i> 새로운 철도망 건설 시작하기</span>
+                <i class="fas fa-arrow-right"></i>
+            </button>
+
+            <div class="text-xs font-extrabold text-zinc-400 uppercase tracking-wider mt-2">저장된 슬롯 목록 (3개)</div>
+            <div id="slot-list" class="flex flex-col gap-2.5"></div>
+        </div>
+    </div>
+
+    <!-- ================= 3. 주간 보너스 보상 모달 ================= -->
+    <div id="weekly-modal" class="fixed inset-0 bg-black/65 backdrop-blur-sm z-[2500] hidden items-center justify-center p-4">
+        <div class="bg-white text-zinc-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-zinc-200 text-center flex flex-col gap-4">
+            <div class="w-12 h-12 rounded-2xl bg-amber-100 text-amber-600 flex items-center justify-center mx-auto text-2xl">
+                <i class="fas fa-gift"></i>
+            </div>
+            <div>
+                <span class="text-xs font-extrabold text-indigo-600 uppercase tracking-wider">WEEKLY TRANSIT REPORT</span>
+                <h3 class="text-xl font-black mt-0.5">주간 우수 운영 본부 보너스!</h3>
+                <p class="text-xs text-zinc-500 mt-1">시민들의 호평 속에 한 주를 마무리했습니다. 보상을 하나 선택하세요.</p>
+            </div>
+            <div class="grid grid-cols-2 gap-3 mt-1">
+                <button onclick="claimWeeklyReward('train')" class="p-4 rounded-2xl border-2 border-zinc-200 hover:border-indigo-600 hover:bg-indigo-50/50 transition flex flex-col items-center gap-2">
+                    <i class="fas fa-subway text-2xl text-indigo-600"></i>
+                    <div class="font-extrabold text-sm">신형 전동차 1대</div>
+                    <div class="text-[11px] text-zinc-500">현재 선택된 노선에 즉시 무료 열차 1대 투입</div>
+                </button>
+                <button onclick="claimWeeklyReward('money')" class="p-4 rounded-2xl border-2 border-zinc-200 hover:border-emerald-600 hover:bg-emerald-50/50 transition flex flex-col items-center gap-2">
+                    <i class="fas fa-coins text-2xl text-emerald-600"></i>
+                    <div class="font-extrabold text-sm">특별 교부금 ₩2,000</div>
+                    <div class="text-[11px] text-zinc-500">역 연장 및 증축을 위한 즉시 현금 지원</div>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 4. 실제 지도 컨테이너 ================= -->
+<!-- ================= 뉴스 기록장(아카이브) 모달 ================= -->
+    <div id="news-history-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[3500] hidden items-center justify-center p-4">
+        <div class="bg-white text-zinc-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-zinc-200 flex flex-col gap-4 max-h-[80vh]">
+            <div class="flex justify-between items-center border-b border-zinc-200 pb-3">
+                <div class="flex items-center gap-2">
+                    <span class="px-2.5 py-1 rounded-lg bg-zinc-900 text-white text-xs font-black">ARCHIVE</span>
+                    <h3 class="text-lg font-black">도시철도 관제 뉴스 기록장</h3>
+                </div>
+                <button onclick="toggleNewsHistory(false)" class="w-8 h-8 rounded-full bg-zinc-100 hover:bg-zinc-200 flex items-center justify-center text-zinc-600"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="news-history-list" class="flex flex-col gap-2 overflow-y-auto pr-1 flex-1 text-xs">
+                <!-- 지나간 뉴스 목록이 여기에 쌓입니다 -->
+            </div>
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <!-- ================= 5. 인게임 HUD 오버레이 ================= -->
+    <div class="ui-layer fixed inset-0 flex flex-col justify-between p-3 md:p-4">
+
+        <!-- TOP BAR -->
+        <div class="flex flex-col gap-2">
+            <div class="flex flex-wrap justify-between items-start gap-2">
+                <div class="ui-element bg-white/95 backdrop-blur-md border border-zinc-300 rounded-2xl p-2.5 px-4 shadow-xl flex items-center gap-4 text-zinc-900">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-xl bg-zinc-900 text-white flex items-center justify-center font-black text-base">M</div>
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <h2 id="hud-map-title" class="font-black text-sm leading-none">서울</h2>
+                                <span id="rush-badge" class="hidden text-[9px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-600 border border-rose-300 font-extrabold animate-pulse">러시아워</span>
+                            </div>
+                            <span id="hud-time" class="text-[11px] text-zinc-500 font-bold">Day 1 (06:00)</span>
+                        </div>
+                    </div>
+
+                    <div class="h-6 w-[1px] bg-zinc-200"></div>
+
+                    <div class="flex items-center gap-4 md:gap-5">
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">보유 예산</div>
+                            <div class="text-sm md:text-base font-black text-emerald-600">₩<span id="stat-money">3,500</span></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">누적 수송</div>
+                            <div class="text-xs md:text-sm font-black text-zinc-800"><span id="stat-passengers">0</span><span class="text-[10px] font-semibold text-zinc-400 ml-0.5">명</span></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">시민 만족도</div>
+                            <div class="text-xs md:text-sm font-black text-indigo-600"><span id="stat-rating">100</span>%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live News Ticker -->
+                <div onclick="toggleNewsHistory(true)" title="클릭하여 지난 뉴스 기록 보기" class="ui-element cursor-pointer hover:border-indigo-500 transition flex-1 min-w-[250px] max-w-xl bg-white/95 backdrop-blur-md border border-zinc-300 rounded-2xl p-2.5 px-4 shadow-xl flex items-center gap-3 text-zinc-800">
+                    <span id="news-badge" class="px-2 py-0.5 rounded-md bg-zinc-900 text-white text-[10px] font-black uppercase tracking-wider shrink-0">NEWS</span>
+                    <div class="overflow-hidden flex-1">
+                        <p id="news-text" class="text-xs font-bold text-zinc-700 truncate">도시철도 관제 시스템 가동 중. 연속된 두 역을 클릭해 첫 노선을 개통하세요!</p>
+                    </div>
+                    <span id="festival-timer" class="text-[11px] font-extrabold text-fuchsia-600 shrink-0 hidden"></span>
+                </div>
+
+                <!-- Speed & Controls -->
+                <div class="ui-element flex items-center gap-1.5 bg-white/95 backdrop-blur-md border border-zinc-300 rounded-2xl p-1.5 px-2.5 shadow-xl text-zinc-800">
+                    <button onclick="setGameSpeed(0)" id="btn-speed-0" class="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-zinc-100 text-zinc-500 text-xs transition"><i class="fas fa-pause"></i></button>
+                    <button onclick="setGameSpeed(1)" id="btn-speed-1" class="w-8 h-8 rounded-xl flex items-center justify-center bg-zinc-900 text-white font-black text-xs transition">1x</button>
+                    <button onclick="setGameSpeed(2)" id="btn-speed-2" class="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-zinc-100 text-zinc-500 font-black text-xs transition">2x</button>
+                    <button onclick="setGameSpeed(4)" id="btn-speed-4" class="w-8 h-8 rounded-xl flex items-center justify-center hover:bg-zinc-100 text-zinc-500 font-black text-xs transition">4x</button>
+                    <div class="h-5 w-[1px] bg-zinc-200 mx-0.5"></div>
+<button onclick="toggleSound()" id="btn-sound" class="px-2.5 h-8 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-900 text-[11px] font-extrabold flex items-center gap-1 transition">
+    <i class="fas fa-volume-up"></i> 사운드켜기
+</button>
+                    <button onclick="cycleMapTheme()" class="px-2.5 h-8 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-[11px] font-bold flex items-center gap-1 transition">
+                        <i class="fas fa-layer-group text-indigo-600"></i> 지도테마
+                    </button>
+                    <button onclick="quickSaveToSlot()" class="px-2.5 h-8 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold flex items-center gap-1 transition">
+                        <i class="fas fa-save"></i> 저장
+                    </button>
+                    <button onclick="returnToMainMenu()" class="px-2.5 h-8 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-white text-[11px] font-bold flex items-center gap-1 transition">
+                        <i class="fas fa-th-large"></i> 메인메뉴
+                    </button>
+                </div>
+            </div>
+
+            <!-- Second Row: Guide & Skills -->
+            <div class="flex flex-wrap justify-between items-center gap-2">
+                <div class="ui-element bg-zinc-900/90 backdrop-blur-md text-white px-4 py-1.5 rounded-full shadow-lg text-xs font-semibold flex items-center gap-2">
+                    <i class="fas fa-bullhorn text-amber-400"></i>
+                    <span id="guide-text">노선을 선택한 뒤, 지도에서 연속된 두 역을 클릭하여 첫 지하철을 개통하세요!</span>
+                </div>
+
+                <div class="ui-element flex items-center gap-1.5 bg-white/95 backdrop-blur-md border border-zinc-300 rounded-full p-1 px-3 shadow-lg text-zinc-800">
+                    <span class="text-[10px] font-extrabold text-zinc-400 mr-1">특수 지령</span>
+                    <button onclick="useSkill('express')" class="px-2.5 py-1 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-300 text-[11px] font-extrabold text-amber-800 transition flex items-center gap-1">
+                        <i class="fas fa-bolt text-amber-500"></i> 급행다이어 <span class="text-[10px] text-emerald-700">₩1200</span>
+                    </button>
+                    <button onclick="useSkill('vip')" class="px-2.5 py-1 rounded-full bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-[11px] font-extrabold text-indigo-800 transition flex items-center gap-1">
+                        <i class="fas fa-crown text-amber-500"></i> 황금관광열차 <span class="text-[10px] text-emerald-700">₩1500</span>
+                    </button>
+                    <button onclick="useSkill('clear')" class="px-2.5 py-1 rounded-full bg-rose-50 hover:bg-rose-100 border border-rose-300 text-[11px] font-extrabold text-rose-800 transition flex items-center gap-1">
+                        <i class="fas fa-bus text-rose-500"></i> 비상전세버스 <span class="text-[10px] text-emerald-700">₩1800</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- BOTTOM BAR -->
+        <div class="flex justify-between items-end gap-4">
+
+            <!-- Left: Line Management -->
+            <div class="ui-element bg-white/95 backdrop-blur-md border border-zinc-300 rounded-3xl p-4 shadow-2xl w-[380px] max-w-full flex flex-col gap-3 text-zinc-900">
+                <div class="flex justify-between items-center">
+                    <span class="text-xs font-black text-zinc-700"><i class="fas fa-subway text-indigo-600 mr-1"></i>노선 선택 및 차량기지</span>
+                    <span id="active-lines-count" class="text-[11px] text-zinc-500 font-bold">개통 노선: 0개</span>
+                </div>
+
+                <div id="line-tabs" class="grid grid-cols-3 gap-1.5 max-h-28 overflow-y-auto pr-1"></div>
+
+                <div id="line-upgrade-panel" class="bg-zinc-100/90 rounded-2xl p-3 border border-zinc-200 flex flex-col gap-2">
+                    <div class="flex justify-between items-center border-b border-zinc-200 pb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span id="selected-line-dot" class="w-3.5 h-3.5 rounded-md shadow-sm"></span>
+                            <span id="selected-line-name" class="font-black text-sm">1호선</span>
+                        </div>
+                        <span id="selected-line-status" class="text-[10px] px-2 py-0.5 rounded-full bg-zinc-200 text-zinc-700 font-extrabold">미개통</span>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-1.5 text-center bg-white p-2 rounded-xl border border-zinc-200/80 text-xs">
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">편성 열차</div>
+                            <div class="font-black text-zinc-900"><span id="line-stat-trains">0</span>대</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">운행 속도</div>
+                            <div class="font-black text-indigo-600">Lv.<span id="line-stat-speed">1</span></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">열차 정원</div>
+                            <div class="font-black text-emerald-600"><span id="line-stat-cap">25</span>명</div>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                        <button onclick="buyTrain()" id="btn-buy-train" class="w-full py-2 px-3 rounded-xl bg-zinc-900 hover:bg-indigo-600 disabled:opacity-35 text-white flex justify-between items-center text-xs font-bold transition">
+                            <span><i class="fas fa-plus-circle mr-1.5 text-amber-400"></i>신규 열차 편성 (배차 단축)</span>
+                            <span class="text-amber-300 font-black">₩<span id="cost-train">1,100</span></span>
+                        </button>
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <button onclick="upgradeLineSpeed()" id="btn-up-speed" class="py-1.5 px-2.5 rounded-xl bg-white hover:bg-zinc-50 border border-zinc-300 disabled:opacity-40 flex justify-between items-center text-[11px] font-extrabold transition">
+                                <span>⚡ 속도 개량</span>
+                                <span class="text-emerald-600">₩<span id="cost-speed">900</span></span>
+                            </button>
+                            <button onclick="upgradeLineCapacity()" id="btn-up-cap" class="py-1.5 px-2.5 rounded-xl bg-white hover:bg-zinc-50 border border-zinc-300 disabled:opacity-40 flex justify-between items-center text-[11px] font-extrabold transition">
+                                <span>🚃 객차 증결</span>
+                                <span class="text-emerald-600">₩<span id="cost-cap">800</span></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Station Inspector -->
+            <div id="station-inspector" class="ui-element bg-white/95 backdrop-blur-md border border-zinc-300 rounded-3xl p-4 shadow-2xl w-80 hidden flex-col gap-3 text-zinc-900">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <h3 id="insp-name" class="font-black text-base">역 이름</h3>
+                            <span id="insp-transfer-badge" class="hidden text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded font-extrabold">환승역</span>
+                            <span id="insp-festival-badge" class="hidden text-[10px] px-1.5 py-0.5 bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-300 rounded font-extrabold animate-pulse">축제중 🎉</span>
+                        </div>
+                        <p id="insp-lines" class="text-[11px] text-zinc-500 font-semibold mt-0.5">소속 노선</p>
+                    </div>
+                    <button onclick="closeInspector()" class="text-zinc-400 hover:text-zinc-800"><i class="fas fa-times"></i></button>
+                </div>
+
+                <div class="bg-zinc-100 p-3 rounded-2xl border border-zinc-200">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-zinc-500 font-bold">승강장 대기 승객</span>
+                        <span class="font-black"><span id="insp-waiting">0</span> / <span id="insp-max">35</span>명</span>
+                    </div>
+                    <div class="w-full h-2.5 bg-zinc-200 rounded-full overflow-hidden">
+                        <div id="insp-bar" class="h-full bg-indigo-600 transition-all duration-300" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <div id="insp-actions" class="flex flex-col gap-1.5"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        /*************************************************************************
+         * 0. 안전장치: 만약 stations-data.js가 확장자 문제로 로드 안 됐을 때 자동 복구
+         *************************************************************************/
+        if (typeof ALL_LINES_DB === 'undefined' || typeof GAME_MAPS === 'undefined') {
+            function buildLineStations(stationNames, anchors) {
+                const result = [];
+                for (let i = 0; i < anchors.length - 1; i++) {
+                    const start = anchors[i], end = anchors[i + 1], steps = end.idx - start.idx;
+                    for (let s = 0; s < steps; s++) {
+                        const idx = start.idx + s, t = s / steps;
+                        result.push({ name: stationNames[idx], lat: start.lat + (end.lat - start.lat) * t, lng: start.lng + (end.lng - start.lng) * t });
+                    }
+                }
+                const last = anchors[anchors.length - 1];
+                result.push({ name: stationNames[last.idx], lat: last.lat, lng: last.lng });
+                return result;
+            }
+            window.ALL_LINES_DB = {
+                "s_1": { name: "1호선", badge: "1", color: "#0052A4", isLoop: false, stations: buildLineStations(["소요산","동두천","보산","동두천중앙","지행","덕정","덕계","양주","녹양","가능","의정부","회룡","망월사","도봉산","도봉","방학","창동","녹천","월계","광운대","석계","신이문","외대앞","회기","청량리","제기동","신설동","동묘앞","동대문","종로5가","종로3가","종각","시청","서울역","남영","용산","노량진","대방","신길","영등포","신도림","구로","구일","개봉","오류동","온수","역곡","소사","부천","중동","송내","부개","부평","백운","동암","간석","주안","도화","제물포","도원","동인천","인천"], [{idx:0,lat:37.948,lng:127.061},{idx:10,lat:37.738,lng:127.046},{idx:13,lat:37.689,lng:127.046},{idx:16,lat:37.653,lng:127.047},{idx:20,lat:37.615,lng:127.065},{idx:24,lat:37.580,lng:127.046},{idx:27,lat:37.573,lng:127.016},{idx:28,lat:37.571,lng:127.009},{idx:30,lat:37.570,lng:126.992},{idx:32,lat:37.565,lng:126.977},{idx:33,lat:37.555,lng:126.972},{idx:35,lat:37.529,lng:126.964},{idx:36,lat:37.514,lng:126.942},{idx:37,lat:37.513,lng:126.926},{idx:38,lat:37.517,lng:126.917},{idx:40,lat:37.508,lng:126.891},{idx:45,lat:37.492,lng:126.823},{idx:48,lat:37.484,lng:126.782},{idx:52,lat:37.489,lng:126.724},{idx:61,lat:37.476,lng:126.616}]) },
+                "s_2": { name: "2호선", badge: "2", color: "#00A84D", isLoop: true, stations: buildLineStations(["시청","을지로입구","을지로3가","을지로4가","동대문역사문화공원","신당","상왕십리","왕십리","한양대","뚝섬","성수","건대입구","구의","강변","잠실나루","잠실","잠실새내","종합운동장","삼성","선릉","역삼","강남","교대","서초","방배","사당","낙성대","서울대입구","봉천","신림","신대방","구로디지털단지","대림","신도림","문래","영등포구청","당산","합정","홍대입구","신촌","이대","아현","충정로"], [{idx:0,lat:37.565,lng:126.977},{idx:2,lat:37.566,lng:126.992},{idx:4,lat:37.565,lng:127.008},{idx:5,lat:37.565,lng:127.017},{idx:7,lat:37.561,lng:127.037},{idx:10,lat:37.544,lng:127.055},{idx:11,lat:37.540,lng:127.070},{idx:15,lat:37.513,lng:127.100},{idx:17,lat:37.510,lng:127.073},{idx:19,lat:37.504,lng:127.049},{idx:21,lat:37.497,lng:127.027},{idx:22,lat:37.493,lng:127.014},{idx:25,lat:37.476,lng:126.981},{idx:29,lat:37.484,lng:126.929},{idx:32,lat:37.493,lng:126.895},{idx:33,lat:37.508,lng:126.891},{idx:35,lat:37.524,lng:126.895},{idx:36,lat:37.534,lng:126.902},{idx:37,lat:37.549,lng:126.913},{idx:38,lat:37.557,lng:126.924},{idx:42,lat:37.559,lng:126.963}]) },
+                "s_3": { name: "3호선", badge: "3", color: "#EF7C1C", isLoop: false, stations: buildLineStations(["대화","주엽","정발산","마두","백석","대곡","화정","원당","원흥","삼송","지축","구파발","연신내","불광","녹번","홍제","무악재","독립문","경복궁","안국","종로3가","을지로3가","충무로","동대입구","약수","금호","옥수","압구정","신사","잠원","고속터미널","교대","남부터미널","양재","매봉","도곡","대치","학여울","대청","일원","수서","가락시장","경찰병원","오금"], [{idx:0,lat:37.676,lng:126.747},{idx:5,lat:37.631,lng:126.811},{idx:12,lat:37.619,lng:126.921},{idx:13,lat:37.610,lng:126.929},{idx:18,lat:37.575,lng:126.973},{idx:20,lat:37.570,lng:126.992},{idx:21,lat:37.566,lng:126.992},{idx:22,lat:37.561,lng:126.994},{idx:24,lat:37.554,lng:127.010},{idx:26,lat:37.540,lng:127.018},{idx:28,lat:37.516,lng:127.019},{idx:30,lat:37.504,lng:127.004},{idx:31,lat:37.493,lng:127.014},{idx:33,lat:37.484,lng:127.034},{idx:40,lat:37.487,lng:127.101},{idx:41,lat:37.492,lng:127.118},{idx:43,lat:37.502,lng:127.128}]) },
+                "s_4": { name: "4호선", badge: "4", color: "#00A5DE", isLoop: false, stations: buildLineStations(["진접","오남","별내별가람","당고개","상계","노원","창동","쌍문","수유","미아","미아사거리","길음","성신여대입구","한성대입구","혜화","동대문","동대문역사문화공원","충무로","명동","회현","서울역","숙대입구","삼각지","신용산","이촌","동작","총신대입구","사당","남태령","선바위","경마공원","대공원","과천","정부과천청사","인덕원","평촌","범계","금정","산본","수리산","대야미","반월","상록수","한대앞","중앙","고잔","초지","안산","신길온천","정왕","오이도"], [{idx:0,lat:37.725,lng:127.204},{idx:3,lat:37.670,lng:127.079},{idx:5,lat:37.655,lng:127.061},{idx:6,lat:37.653,lng:127.047},{idx:15,lat:37.571,lng:127.009},{idx:16,lat:37.565,lng:127.008},{idx:17,lat:37.561,lng:126.994},{idx:20,lat:37.555,lng:126.972},{idx:22,lat:37.534,lng:126.973},{idx:24,lat:37.522,lng:126.974},{idx:25,lat:37.502,lng:126.980},{idx:26,lat:37.486,lng:126.982},{idx:27,lat:37.476,lng:126.981},{idx:34,lat:37.401,lng:126.976},{idx:37,lat:37.372,lng:126.943},{idx:50,lat:37.362,lng:126.738}]) },
+                "s_5": { name: "5호선", badge: "5", color: "#996CAC", isLoop: false, stations: buildLineStations(["방화","개화산","김포공항","송정","마곡","발산","우장산","화곡","까치산","신정","목동","오목교","양평","영등포구청","영등포시장","신길","여의도","여의나루","마포","공덕","애오개","충정로","서대문","광화문","종로3가","을지로4가","동대문역사문화공원","청구","신금호","행당","왕십리","마장","답십리","장한평","군자","아차산","광나루","천호","강동","길동","굽은다리","명일","고덕","상일동","강일","미사","하남풍산","하남시청","하남검단산"], [{idx:0,lat:37.577,lng:126.812},{idx:2,lat:37.562,lng:126.801},{idx:8,lat:37.531,lng:126.846},{idx:13,lat:37.524,lng:126.895},{idx:15,lat:37.517,lng:126.917},{idx:16,lat:37.521,lng:126.924},{idx:17,lat:37.527,lng:126.932},{idx:19,lat:37.544,lng:126.951},{idx:21,lat:37.559,lng:126.963},{idx:24,lat:37.570,lng:126.992},{idx:26,lat:37.565,lng:127.008},{idx:27,lat:37.560,lng:127.013},{idx:30,lat:37.561,lng:127.037},{idx:34,lat:37.557,lng:127.079},{idx:37,lat:37.538,lng:127.123},{idx:48,lat:37.539,lng:127.223}]) },
+                "s_6": { name: "6호선", badge: "6", color: "#CD7C2F", isLoop: false, stations: buildLineStations(["응암","역촌","불광","독바위","연신내","구산","새절","증산","디지털미디어시티","월드컵경기장","마포구청","망원","합정","상수","광흥창","대흥","공덕","효창공원앞","삼각지","녹사평","이태원","한강진","버티고개","약수","청구","신당","동묘앞","창신","보문","안암","고려대","월곡","상월곡","돌곶이","석계","태릉입구","화랑대","봉화산","신내"], [{idx:0,lat:37.598,lng:126.915},{idx:2,lat:37.610,lng:126.929},{idx:4,lat:37.619,lng:126.921},{idx:8,lat:37.576,lng:126.900},{idx:9,lat:37.569,lng:126.899},{idx:12,lat:37.549,lng:126.913},{idx:16,lat:37.544,lng:126.951},{idx:18,lat:37.534,lng:126.973},{idx:20,lat:37.534,lng:126.994},{idx:23,lat:37.554,lng:127.010},{idx:24,lat:37.560,lng:127.013},{idx:25,lat:37.565,lng:127.017},{idx:26,lat:37.573,lng:127.016},{idx:34,lat:37.615,lng:127.065},{idx:35,lat:37.617,lng:127.075},{idx:38,lat:37.612,lng:127.103}]) },
+                "s_7": { name: "7호선", badge: "7", color: "#747F00", isLoop: false, stations: buildLineStations(["장암","도봉산","수락산","마들","노원","중계","하계","공릉","태릉입구","먹골","중화","상봉","면목","사가정","용마산","중곡","군자","어린이대공원","건대입구","자양","청담","강남구청","학동","논현","반포","고속터미널","내방","총신대입구","남성","숭실대입구","상도","장승배기","신대방삼거리","보라매","신풍","대림","남구로","가산디지털단지","철산","광명사거리","천왕","온수","까치울","부천종합운동장","춘의","신중동","부천시청","상동","삼산체육관","굴포천","부평구청","산곡","석남"], [{idx:0,lat:37.700,lng:127.052},{idx:1,lat:37.689,lng:127.046},{idx:4,lat:37.655,lng:127.061},{idx:8,lat:37.617,lng:127.075},{idx:11,lat:37.596,lng:127.085},{idx:16,lat:37.557,lng:127.079},{idx:18,lat:37.540,lng:127.070},{idx:21,lat:37.517,lng:127.041},{idx:23,lat:37.511,lng:127.021},{idx:25,lat:37.504,lng:127.004},{idx:27,lat:37.486,lng:126.982},{idx:33,lat:37.499,lng:126.920},{idx:35,lat:37.493,lng:126.895},{idx:37,lat:37.481,lng:126.882},{idx:41,lat:37.492,lng:126.823},{idx:50,lat:37.508,lng:126.720},{idx:52,lat:37.506,lng:126.676}]) },
+                "s_8": { name: "8호선", badge: "8", color: "#E6186C", isLoop: false, stations: buildLineStations(["별내","다산","동구릉","구리","장자호수공원","암사역사공원","암사","천호","강동구청","몽촌토성","잠실","석촌","송파","가락시장","문정","장지","복정","남위례","산성","남한산성입구","단대오거리","신흥","수진","모란"], [{idx:0,lat:37.642,lng:127.126},{idx:3,lat:37.603,lng:127.143},{idx:7,lat:37.538,lng:127.123},{idx:10,lat:37.513,lng:127.100},{idx:11,lat:37.505,lng:127.106},{idx:13,lat:37.492,lng:127.118},{idx:16,lat:37.470,lng:127.126},{idx:23,lat:37.432,lng:127.129}]) },
+                "s_9": { name: "9호선", badge: "9", color: "#BDB092", isLoop: false, stations: buildLineStations(["개화","김포공항","공항시장","신방화","마곡나루","양천향교","가양","증미","등촌","염창","신목동","선유도","당산","국회의사당","여의도","샛강","노량진","노들","흑석","동작","구반포","신반포","고속터미널","사평","신논현","언주","선정릉","삼성중앙","봉은사","종합운동장","삼전","석촌고분","석촌","송파나루","한성백제","올림픽공원","둔촌오륜","중앙보훈병원"], [{idx:0,lat:37.578,lng:126.798},{idx:1,lat:37.562,lng:126.801},{idx:6,lat:37.561,lng:126.854},{idx:12,lat:37.534,lng:126.902},{idx:14,lat:37.521,lng:126.924},{idx:15,lat:37.517,lng:126.928},{idx:16,lat:37.514,lng:126.942},{idx:19,lat:37.502,lng:126.980},{idx:22,lat:37.504,lng:127.004},{idx:24,lat:37.504,lng:127.025},{idx:26,lat:37.510,lng:127.043},{idx:29,lat:37.510,lng:127.073},{idx:32,lat:37.505,lng:127.106},{idx:35,lat:37.516,lng:127.130},{idx:37,lat:37.529,lng:127.148}]) },
+                "s_sinbundang": { name: "신분당선", badge: "신분당", color: "#D4003B", isLoop: false, stations: buildLineStations(["신사","논현","신논현","강남","양재","양재시민의숲","청계산입구","판교","정자","미금","동천","수지구청","성복","상현","광교중앙","광교"], [{idx:0,lat:37.516,lng:127.019},{idx:1,lat:37.511,lng:127.021},{idx:2,lat:37.504,lng:127.025},{idx:3,lat:37.497,lng:127.027},{idx:4,lat:37.484,lng:127.034},{idx:7,lat:37.394,lng:127.111},{idx:9,lat:37.350,lng:127.108},{idx:15,lat:37.302,lng:127.044}]) },
+                "s_sillim": { name: "신림선", badge: "신림", color: "#6789CA", isLoop: false, stations: buildLineStations(["샛강","대방","서울지방병무청","보라매","보라매공원","보라매병원","당곡","신림","서원","서울대벤처타운","관악산"], [{idx:0,lat:37.517,lng:126.928},{idx:1,lat:37.513,lng:126.926},{idx:3,lat:37.499,lng:126.920},{idx:7,lat:37.484,lng:126.929},{idx:10,lat:37.468,lng:126.945}]) },
+                "b_1": { name: "부산 1호선", badge: "1", color: "#F06A00", isLoop: false, stations: buildLineStations(["다대포해수욕장","다대포항","낫개","신장림","장림","동매","신평","하단","당리","사하","괴정","대티","서대신","동대신","토성","자갈치","남포","중앙","부산역","초량","부산진","좌천","범일","범내골","서면","부전","양정","시청","연산","교대","동래","명륜","온천장","부산대","장전","구서","두실","남산","범어사","노포"], [{idx:0,lat:35.048,lng:128.966},{idx:7,lat:35.106,lng:128.966},{idx:15,lat:35.097,lng:129.026},{idx:18,lat:35.115,lng:129.039},{idx:24,lat:35.157,lng:129.059},{idx:25,lat:35.163,lng:129.062},{idx:28,lat:35.186,lng:129.081},{idx:29,lat:35.196,lng:129.080},{idx:30,lat:35.205,lng:129.078},{idx:39,lat:35.284,lng:129.095}]) },
+                "b_2": { name: "부산 2호선", badge: "2", color: "#81BF48", isLoop: false, stations: buildLineStations(["장산","중동","해운대","동백","벡스코","센텀시티","민락","수영","광안","금련산","남천","경성대·부경대","대연","못골","지게골","문현","국제금융센터·부산은행","전포","서면","부암","가야","동의대","개금","냉정","주례","감전","사상","덕포","모덕","모라","구남","구명","덕천","수정","화명","율리","동원","금곡","호포","증산","부산대양산캠퍼스","남양산","양산"], [{idx:0,lat:35.169,lng:129.176},{idx:2,lat:35.163,lng:129.158},{idx:4,lat:35.168,lng:129.138},{idx:7,lat:35.165,lng:129.114},{idx:11,lat:35.137,lng:129.100},{idx:18,lat:35.157,lng:129.059},{idx:26,lat:35.162,lng:128.984},{idx:32,lat:35.210,lng:129.005},{idx:38,lat:35.280,lng:129.017},{idx:42,lat:35.338,lng:129.026}]) },
+                "b_3": { name: "부산 3호선", badge: "3", color: "#BB8C00", isLoop: false, stations: buildLineStations(["수영","망미","배산","물만골","연산","거제","종합운동장","사직","미남","만덕","남산정","숙등","덕천","구포","강서구청","체육공원","대저"], [{idx:0,lat:35.165,lng:129.114},{idx:4,lat:35.186,lng:129.081},{idx:5,lat:35.188,lng:129.073},{idx:8,lat:35.205,lng:129.068},{idx:12,lat:35.210,lng:129.005},{idx:16,lat:35.213,lng:128.960}]) },
+                "b_4": { name: "부산 4호선", badge: "4", color: "#217DCB", isLoop: false, stations: buildLineStations(["미남","동래","수안","낙민","충렬사","명장","서동","금사","반여농산물시장","석대","영산대","윗반송","고촌","안평"], [{idx:0,lat:35.205,lng:129.068},{idx:1,lat:35.205,lng:129.078},{idx:8,lat:35.217,lng:129.137},{idx:13,lat:35.237,lng:129.171}]) },
+                "b_donghae": { name: "동해선", badge: "동해", color: "#0054A6", isLoop: false, stations: buildLineStations(["부전","거제해맞이","거제","교대","동래","안락","부산원동","재송","센텀","벡스코","신해운대","송정","오시리아","기장","일광","좌천","월내","서생","남창","망양","덕하","개운포","태화강"], [{idx:0,lat:35.163,lng:129.062},{idx:2,lat:35.188,lng:129.073},{idx:3,lat:35.196,lng:129.080},{idx:9,lat:35.168,lng:129.138},{idx:11,lat:35.180,lng:129.199},{idx:13,lat:35.244,lng:129.222},{idx:22,lat:35.538,lng:129.353}]) },
+                "b_gimhae": { name: "부산김해경전철", badge: "김해", color: "#8652A1", isLoop: false, stations: buildLineStations(["사상","괘법르네시떼","서부산유통지구","공항","덕두","등구","대저","평강","대사","불암","지내","김해대학","인제대","김해시청","부원","봉황","수로왕릉","박물관","연지공원","장신대","가야대"], [{idx:0,lat:35.162,lng:128.984},{idx:3,lat:35.171,lng:128.947},{idx:6,lat:35.213,lng:128.960},{idx:13,lat:35.226,lng:128.889},{idx:20,lat:35.255,lng:128.854}]) },
+                "dg_1": { name: "대구 1호선", badge: "1", color: "#D93F5C", isLoop: false, stations: buildLineStations(["설화명곡","화원","대곡","진천","월배","상인","월촌","송현","서부정류장","대명","안지랑","현충로","영대병원","교대","명덕","반월당","중앙로","대구역","칠성시장","신천","동대구역","동구청","아양교","동촌","해안","방촌","용계","율하","신기","반야월","각산","안심","대구한의대병원","부호","하양"], [{idx:0,lat:35.798,lng:128.489},{idx:5,lat:35.818,lng:128.537},{idx:14,lat:35.857,lng:128.591},{idx:15,lat:35.865,lng:128.593},{idx:17,lat:35.876,lng:128.596},{idx:20,lat:35.879,lng:128.628},{idx:31,lat:35.871,lng:128.733},{idx:34,lat:35.910,lng:128.815}]) },
+                "dg_2": { name: "대구 2호선", badge: "2", color: "#00AA80", isLoop: false, stations: buildLineStations(["문양","다사","대실","강창","계명대","성서산업단지","이곡","용산","죽전","감삼","두류","내당","반고개","청라언덕","반월당","경대병원","대구은행","범어","수성구청","만촌","담티","연호","대공원","고산","신매","사월","정평","임당","영남대"], [{idx:0,lat:35.864,lng:128.436},{idx:4,lat:35.856,lng:128.497},{idx:10,lat:35.857,lng:128.555},{idx:13,lat:35.865,lng:128.581},{idx:14,lat:35.865,lng:128.593},{idx:17,lat:35.859,lng:128.625},{idx:22,lat:35.844,lng:128.678},{idx:28,lat:35.836,lng:128.753}]) },
+                "dg_3": { name: "대구 3호선", badge: "3", color: "#FFB100", isLoop: false, stations: buildLineStations(["칠곡경대병원","학정","팔거","동천","칠곡운암","구암","태전","매천","매천시장","팔달","공단","만평","팔달시장","원대","북구청","달성공원","서문시장","청라언덕","남산","명덕","건들바위","대봉교","수성시장","수성구민운동장","어린이세상","황금","수성못","지산","범물","용지"], [{idx:0,lat:35.957,lng:128.563},{idx:11,lat:35.893,lng:128.567},{idx:16,lat:35.870,lng:128.581},{idx:17,lat:35.865,lng:128.581},{idx:19,lat:35.857,lng:128.591},{idx:26,lat:35.829,lng:128.622},{idx:29,lat:35.818,lng:128.641}]) },
+                "gj_1": { name: "광주 1호선", badge: "1", color: "#009088", isLoop: false, stations: buildLineStations(["녹동","소태","학동·증심사입구","남광주","문화전당","금남로4가","금남로5가","양동시장","돌고개","농성","화정","쌍촌","운천","상무","김대중컨벤션센터","공항","송정공원","광주송정역","도산","평동"], [{idx:0,lat:35.118,lng:126.942},{idx:3,lat:35.139,lng:126.921},{idx:4,lat:35.147,lng:126.919},{idx:9,lat:35.154,lng:126.885},{idx:13,lat:35.147,lng:126.849},{idx:17,lat:35.137,lng:126.791},{idx:19,lat:35.124,lng:126.768}]) },
+                "gj_2": { name: "광주 2호선", badge: "2", color: "#0052A4", isLoop: true, stations: buildLineStations(["시청","상무","금호","마재","풍암","원광대병원","월드컵경기장","백운광장","남광주","조선대","살레시오여고","필문대로","두암","교대","전남대","북구청","광주역","운암","유스퀘어","치평","수완","하남","신가","신창","첨단","과기원","오룡","용봉","일곡","삼각","오치","매곡","전남대후문","서방","푸른길","산수","지산","지원"], [{idx:0,lat:35.159,lng:126.851},{idx:1,lat:35.147,lng:126.849},{idx:4,lat:35.125,lng:126.865},{idx:7,lat:35.132,lng:126.903},{idx:8,lat:35.139,lng:126.921},{idx:14,lat:35.174,lng:126.912},{idx:16,lat:35.165,lng:126.909},{idx:18,lat:35.160,lng:126.879},{idx:20,lat:35.190,lng:126.830},{idx:24,lat:35.218,lng:126.848},{idx:28,lat:35.205,lng:126.898},{idx:32,lat:35.179,lng:126.915},{idx:37,lat:35.142,lng:126.928}]) },
+                "dj_1": { name: "대전 1호선", badge: "1", color: "#007448", isLoop: false, stations: buildLineStations(["판암","신흥","대동","대전역","중앙로","중구청","서대전네거리","오룡","용문","탄방","시청","정부청사","갈마","월평","갑천","유성온천","구암","현충원","월드컵경기장","노은","지족","반석"], [{idx:0,lat:36.316,lng:127.458},{idx:3,lat:36.332,lng:127.434},{idx:4,lat:36.328,lng:127.425},{idx:6,lat:36.322,lng:127.412},{idx:10,lat:36.351,lng:127.386},{idx:15,lat:36.353,lng:127.341},{idx:18,lat:36.365,lng:127.321},{idx:21,lat:36.391,lng:127.314}]) }
+            };
+            window.GAME_MAPS = {
+                seoul_classic: { id: "seoul_classic", category: "수도권", title: "서울", subtitle: "1호선 · 2호선 · 3호선 · 신림선", center: [37.545, 126.985], zoom: 12, lineKeys: ["s_1", "s_2", "s_3", "s_sillim"], festivals: [{ station: "시청", title: "🏃 서울광장 문화축제 & 마라톤 개최! 시청역 인파 운집!" }, { station: "잠실", title: "⚾ 잠실야구장 빅매치! 잠실역 관람객 폭증!" }, { station: "홍대입구", title: "🎸 홍대 거리예술 페스티벌! 홍대입구역 청년 인파 몰려!" }] },
+                seoul_all: { id: "seoul_all", category: "수도권", title: "서울 올인원", subtitle: "1~9호선 + 신분당선 + 신림선 전 노선", center: [37.545, 126.985], zoom: 12, lineKeys: ["s_1", "s_2", "s_3", "s_4", "s_5", "s_6", "s_7", "s_8", "s_9", "s_sinbundang", "s_sillim"], festivals: [{ station: "여의나루", title: "🎆 여의도 세계불꽃축제 개최! 여의나루역 인파 폭증!" }, { station: "잠실", title: "⚾ 잠실야구장 한국시리즈 빅매치! 잠실역 관람객 운집!" }, { station: "강남", title: "🎤 강남 페스티벌 K-POP 콘서트 개최! 강남역 일대 대혼잡!" }] },
+                busan_all: { id: "busan_all", category: "영남권", title: "부산 올인원", subtitle: "1~4호선 · 동해선 · 부산김해경전철 전 노선", center: [35.165, 129.060], zoom: 12, lineKeys: ["b_1", "b_2", "b_3", "b_4", "b_donghae", "b_gimhae"], festivals: [{ station: "광안", title: "🎆 부산불꽃축제 개막! 광안리 해변 인파로 광안역 마비!" }, { station: "해운대", title: "🏖️ 해운대 바다축제 개막! 해운대역 피서객 대거 몰려!" }] },
+                daegu_all: { id: "daegu_all", category: "영남권", title: "대구", subtitle: "1호선 · 2호선 · 3호선 전 노선", center: [35.865, 128.590], zoom: 12, lineKeys: ["dg_1", "dg_2", "dg_3"], festivals: [{ station: "두류", title: "🍗 대구 치맥페스티벌 개막! 두류역 치맥 인파 대폭증!" }, { station: "반월당", title: "🎭 동성로 파워풀대구페스티벌! 반월당역 만원!" }] },
+                gwangju_all: { id: "gwangju_all", category: "호남·충청권", title: "광주", subtitle: "1호선 · 2호선(순환선) 전 노선", center: [35.155, 126.865], zoom: 12, lineKeys: ["gj_1", "gj_2"], festivals: [{ station: "문화전당", title: "🎨 광주 추억의 충장축제 & 비엔날레! 문화전당역 혼잡!" }] },
+                daejeon_all: { id: "daejeon_all", category: "호남·충청권", title: "대전", subtitle: "대전 1호선 (판암~반석)", center: [36.345, 127.385], zoom: 12, lineKeys: ["dj_1"], festivals: [{ station: "중앙로", title: "🥐 대전 빵축제 & 0시 축제! 성심당 인근 중앙로역 인파 폭증!" }] }
+            };
+        }
+
+        /*************************************************************************
+         * 1. 메인 메뉴 렌더링 (SVG 노선 프리뷰 + 카드 UI)
+         *************************************************************************/
+        let currentModalMapId = null;
+
+        function generateMiniMapSVG(lineKeys) {
+            let minLat = 999, maxLat = -999, minLng = 999, maxLng = -999;
+            lineKeys.forEach(k => {
+                const line = ALL_LINES_DB[k];
+                if (!line) return;
+                line.stations.forEach(s => {
+                    if (s.lat < minLat) minLat = s.lat;
+                    if (s.lat > maxLat) maxLat = s.lat;
+                    if (s.lng < minLng) minLng = s.lng;
+                    if (s.lng > maxLng) maxLng = s.lng;
+                });
+            });
+
+            const padX = 28, padY = 20;
+            const W = 360, H = 175;
+            const latSpan = Math.max(0.05, maxLat - minLat);
+            const lngSpan = Math.max(0.05, maxLng - minLng);
+
+            const toXY = (lat, lng) => {
+                const x = padX + ((lng - minLng) / lngSpan) * (W - padX * 2);
+                const y = H - padY - ((lat - minLat) / latSpan) * (H - padY * 2);
+                return [x.toFixed(1), y.toFixed(1)];
+            };
+
+            let paths = '';
+            let endpoints = '';
+
+            lineKeys.forEach(k => {
+                const line = ALL_LINES_DB[k];
+                if (!line) return;
+                const pts = line.stations.map(s => toXY(s.lat, s.lng).join(','));
+                if (line.isLoop) pts.push(pts[0]);
+
+                paths += `<polyline fill="none" stroke="${line.color}" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />`;
+
+                const first = toXY(line.stations[0].lat, line.stations[0].lng);
+                const last = toXY(line.stations[line.stations.length - 1].lat, line.stations[line.stations.length - 1].lng);
+                endpoints += `<circle cx="${first[0]}" cy="${first[1]}" r="4.5" fill="#F4F0E6" stroke="${line.color}" stroke-width="3" />`;
+                if (!line.isLoop) {
+                    endpoints += `<circle cx="${last[0]}" cy="${last[1]}" r="4.5" fill="#F4F0E6" stroke="${line.color}" stroke-width="3" />`;
+                }
+            });
+
+            return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-44 bg-[#EFECE4] rounded-t-2xl">${paths}${endpoints}</svg>`;
+        }
+
+        function getSavedSlotsCount(mapId) {
+            let count = 0;
+            for (let i = 1; i <= 3; i++) {
+                if (localStorage.getItem(`KMETRO_SAVE_${mapId}_SLOT_${i}`)) count++;
+            }
+            return count;
+        }
+
+        function renderMainMenu() {
+            document.getElementById('db-status-count').innerText = Object.keys(ALL_LINES_DB).length;
+            const container = document.getElementById('menu-categories');
+            container.innerHTML = '';
+
+            const categories = {};
+            Object.values(GAME_MAPS).forEach(m => {
+                if (!categories[m.category]) categories[m.category] = [];
+                categories[m.category].push(m);
+            });
+
+            Object.entries(categories).forEach(([catName, maps]) => {
+                const section = document.createElement('div');
+                let cardsHtml = '';
+
+                maps.forEach(m => {
+                    const svgPreview = generateMiniMapSVG(m.lineKeys);
+                    const savedCount = getSavedSlotsCount(m.id);
+
+                    let badgesHtml = m.lineKeys.map(k => {
+                        const l = ALL_LINES_DB[k];
+                        return `<span class="h-6 min-w-[24px] px-1.5 flex items-center justify-center text-[11px] font-black text-white" style="background:${l.color}">${l.badge}</span>`;
+                    }).join('');
+
+                    cardsHtml += `
+                        <div onclick="openSlotModal('${m.id}')" class="group cursor-pointer bg-white rounded-2xl border border-zinc-200/90 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-200 overflow-hidden flex flex-col justify-between">
+                            <div class="relative overflow-hidden">
+                                ${svgPreview}
+                            </div>
+                            <div class="p-5 flex justify-between items-end gap-3 bg-white">
+                                <div>
+                                    <h3 class="text-2xl font-black text-zinc-900 tracking-tight">${m.title}</h3>
+                                    <p class="text-xs font-semibold text-zinc-500 mt-1">${m.subtitle}</p>
+                                </div>
+                                <div class="flex flex-col items-end gap-1.5 shrink-0">
+                                    <div class="flex rounded-sm overflow-hidden shadow-sm">
+                                        ${badgesHtml}
+                                    </div>
+                                    <span class="text-[11px] font-bold text-zinc-500">저장 ${savedCount}/3</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                section.innerHTML = `
+                    <h2 class="text-base font-black text-zinc-600 mb-3 tracking-wide">${catName}</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        ${cardsHtml}
+                    </div>
+                `;
+                container.appendChild(section);
+            });
+        }
+
+        function openSlotModal(mapId) {
+            currentModalMapId = mapId;
+            const m = GAME_MAPS[mapId];
+            document.getElementById('slot-modal-cat').innerText = m.category;
+            document.getElementById('slot-modal-title').innerText = m.title;
+            document.getElementById('slot-modal-sub').innerText = m.subtitle;
+
+            renderSlotList();
+            const modal = document.getElementById('slot-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function renderSlotList() {
+            const list = document.getElementById('slot-list');
+            list.innerHTML = '';
+
+            for (let i = 1; i <= 3; i++) {
+                const key = `KMETRO_SAVE_${currentModalMapId}_SLOT_${i}`;
+                const raw = localStorage.getItem(key);
+                const div = document.createElement('div');
+                div.className = "p-3.5 rounded-2xl bg-white border border-zinc-200 flex justify-between items-center shadow-sm";
+
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    div.innerHTML = `
+                        <div>
+                            <div class="font-extrabold text-sm text-zinc-900">슬롯 ${i} <span class="text-xs text-indigo-600 ml-1">Day ${data.day} · ₩${data.money.toLocaleString()}</span></div>
+                            <div class="text-[11px] text-zinc-500">누적 승객 ${data.totalPassengers.toLocaleString()}명 · 저장시각: ${data.savedAt || '최근'}</div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="loadFromSlot(${i})" class="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold">불러오기</button>
+                            <button onclick="deleteSlot(${i})" class="px-2.5 py-1.5 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-600 text-xs font-extrabold"><i class="fas fa-trash"></i></button>
+                        </div>
+                    `;
+                } else {
+                    div.innerHTML = `
+                        <div class="text-xs font-bold text-zinc-400">슬롯 ${i} — 비어 있음</div>
+                        <span class="text-[11px] text-zinc-400">인게임에서 저장 가능</span>
+                    `;
+                }
+                list.appendChild(div);
+            }
+        }
+
+        function closeSlotModal() {
+            const modal = document.getElementById('slot-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function startNewGameFromModal() {
+            closeSlotModal();
+            startGame(currentModalMapId, null);
+        }
+
+        function loadFromSlot(slotNum) {
+            const key = `KMETRO_SAVE_${currentModalMapId}_SLOT_${slotNum}`;
+            const raw = localStorage.getItem(key);
+            if (!raw) return;
+            closeSlotModal();
+            startGame(currentModalMapId, JSON.parse(raw), slotNum);
+        }
+
+        function deleteSlot(slotNum) {
+            const key = `KMETRO_SAVE_${currentModalMapId}_SLOT_${slotNum}`;
+            localStorage.removeItem(key);
+            renderSlotList();
+            renderMainMenu();
+        }
+
+        function quickSaveToSlot() {
+            if (!STATE.mapId) return;
+            const slotNum = STATE.activeSlot || 1;
+            STATE.savedAt = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+            localStorage.setItem(`KMETRO_SAVE_${STATE.mapId}_SLOT_${slotNum}`, JSON.stringify(STATE));
+            pushNews(`💾 [슬롯 ${slotNum}]에 현재 철도망과 예산 상태가 안전하게 저장되었습니다!`, "SAVE");
+            renderMainMenu();
+        }
+
+        function returnToMainMenu() {
+            setGameSpeed(0);
+            renderMainMenu();
+            document.getElementById('main-menu').classList.remove('hidden');
+        }
+
+        /*************************************************************************
+         * 2. 지도 엔진 (다중 타일 서버 자동 폴백 + 테마 전환)
+         *************************************************************************/
+        let map = null;
+        let currentTileLayer = null;
+        let themeIndex = 0;
+
+const TILE_THEMES = [
+            {
+                name: "일반 지도 (깔끔)",
+                // 상점, 아이콘, 복잡한 글씨를 모두 뺀 순수 지형+도로망 구글 타일
+                url: "https://mt1.google.com/vt/lyrs=r&hl=ko&apistyle=s.t:2|s.e:l|p.v:off,s.t:4|p.v:off,s.t:3|s.e:l|p.v:off&x={x}&y={y}&z={z}",
+                className: "clean-map-filter"
+            },
+            {
+                name: "프로 지도 (상세)",
+                // 모든 상점, 랜드마크, 도로번호가 다 나오는 실제 구글 지도
+                url: "https://mt1.google.com/vt/lyrs=m&hl=ko&x={x}&y={y}&z={z}",
+                className: ""
+            }
+        ];
+
+        function initMap() {
+            if (map) return;
+            map = L.map('map', {
+                center: [37.545, 126.985],
+                zoom: 12,
+                zoomControl: false,
+                attributionControl: false
+            });
+            applyTileTheme(0);
+        }
+
+        function applyTileTheme(idx) {
+            if (currentTileLayer) map.removeLayer(currentTileLayer);
+            const theme = TILE_THEMES[idx];
+            currentTileLayer = L.tileLayer(theme.url, {
+                maxZoom: 18,
+                minZoom: 10,
+                className: theme.className || ""
+            });
+            currentTileLayer.addTo(map);
+
+            // 버튼 텍스트도 현재 지도 모드로 표시
+            const btn = document.querySelector('button[onclick="cycleMapTheme()"]');
+            if (btn) {
+                btn.innerHTML = `<i class="fas fa-map text-indigo-600"></i> ${theme.name}`;
+            }
+        }
+
+        function cycleMapTheme() {
+            themeIndex = (themeIndex + 1) % TILE_THEMES.length;
+            applyTileTheme(themeIndex);
+            pushNews(`🗺️ 지도 모드가 [${TILE_THEMES[themeIndex].name}]로 전환되었습니다.`, "MAP");
+        }
+
+        /*************************************************************************
+         * 3. 인게임 상태 및 초기화
+         *************************************************************************/
+        let STATE = {};
+        let stationMarkers = {};
+        let linePolylines = {};
+        let bgLinePolylines = {};
+        let trainMarkers = {};
+
+        function startGame(mapId, savedState = null, slotNum = 1) {
+            document.getElementById('main-menu').classList.add('hidden');
+            closeInspector();
+            initMap();
+
+            setTimeout(() => {
+                map.invalidateSize();
+            }, 100);
+
+            Object.values(stationMarkers).forEach(m => map.removeLayer(m));
+            Object.values(linePolylines).forEach(p => map.removeLayer(p));
+            Object.values(bgLinePolylines).forEach(p => map.removeLayer(p));
+            Object.values(trainMarkers).forEach(m => map.removeLayer(m));
+            stationMarkers = {}; linePolylines = {}; bgLinePolylines = {}; trainMarkers = {};
+
+            const mapCfg = GAME_MAPS[mapId];
+            map.setView(mapCfg.center, mapCfg.zoom);
+            document.getElementById('hud-map-title').innerText = mapCfg.title;
+
+            if (savedState) {
+                STATE = savedState;
+                STATE.activeSlot = slotNum;
+            } else {
+                let assignedSlot = 1;
+                for (let i = 1; i <= 3; i++) {
+                    if (!localStorage.getItem(`KMETRO_SAVE_${mapId}_SLOT_${i}`)) {
+                        assignedSlot = i;
+                        break;
+                    }
+                }
+
+                STATE = {
+                    mapId,
+                    activeSlot: assignedSlot,
+                    money: 3500,
+                    totalPassengers: 0,
+                    rating: 100,
+                    gameSpeed: 1,
+                    gameMinutes: 360,
+                    day: 1,
+                    selectedLineId: mapCfg.lineKeys[0],
+                    firstPickStation: null,
+                    inspectedStation: null,
+                    stations: {},
+                    lines: {},
+                    trains: [],
+                    festival: null,
+                    expressSec: 0
+                };
+
+                mapCfg.lineKeys.forEach(lineId => {
+                    const lData = ALL_LINES_DB[lineId];
+                    STATE.lines[lineId] = {
+                        id: lineId,
+                        name: lData.name,
+                        badge: lData.badge,
+                        color: lData.color,
+                        isLoop: lData.isLoop,
+                        allStations: lData.stations.map(s => s.name),
+                        activeIndices: [],
+                        speedLv: 1,
+                        capLv: 1,
+                        trainCount: 0
+                    };
+
+                    lData.stations.forEach(st => {
+                        if (!STATE.stations[st.name]) {
+                            STATE.stations[st.name] = {
+                                name: st.name,
+                                lat: st.lat,
+                                lng: st.lng,
+                                lines: [lineId],
+                                activeLines: [],
+                                waiting: 0,
+                                maxCap: 35,
+                                level: 1,
+                                overloadTimer: 0
+                            };
+                        } else if (!STATE.stations[st.name].lines.includes(lineId)) {
+                            STATE.stations[st.name].lines.push(lineId);
+                        }
+                    });
+                });
+            }
+
+            renderMapElements();
+            renderLineTabs();
+            selectLine(STATE.selectedLineId);
+            setGameSpeed(STATE.gameSpeed || 1);
+            updateUI();
+
+            if (savedState) {
+                STATE.trains.forEach(t => createTrainMarker(t));
+            }
+        }
+
+        /*************************************************************************
+         * 4. 지도 마커 및 건설한 역 이름 상시 표시 시스템
+         *************************************************************************/
+        function renderMapElements() {
+            const mapCfg = GAME_MAPS[STATE.mapId];
+
+            mapCfg.lineKeys.forEach(lineId => {
+                const lData = ALL_LINES_DB[lineId];
+                const coords = lData.stations.map(s => [STATE.stations[s.name].lat, STATE.stations[s.name].lng]);
+                if (lData.isLoop) coords.push(coords[0]);
+
+                bgLinePolylines[lineId] = L.polyline(coords, {
+                    color: lData.color,
+                    weight: 2.5,
+                    opacity: 0.22,
+                    dashArray: '5, 6'
+                }).addTo(map);
+
+                linePolylines[lineId] = L.polyline([], {
+                    color: lData.color,
+                    weight: 7,
+                    opacity: 0.95,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                }).addTo(map);
+            });
+
+            Object.values(STATE.stations).forEach(st => {
+                const marker = L.marker([st.lat, st.lng], {
+                    icon: createStationIcon(st)
+                }).addTo(map);
+
+                marker.on('click', () => onStationClick(st.name));
+                stationMarkers[st.name] = marker;
+                refreshStationTooltip(st);
+            });
+
+            updateAllPolylines();
+        }
+
+        function refreshStationTooltip(st) {
+            const marker = stationMarkers[st.name];
+            if (!marker) return;
+
+            const isBuilt = st.activeLines.length > 0;
+            if (marker.getTooltip()) marker.unbindTooltip();
+
+            marker.bindTooltip(st.name, {
+                permanent: isBuilt,
+                direction: 'bottom',
+                offset: [0, 8],
+                className: isBuilt ? 'station-label-built' : 'station-label-hover'
+            });
+        }
+
+        function createStationIcon(st) {
+            const isUnlocked = st.activeLines.length > 0;
+            const isTransfer = st.activeLines.length >= 2;
+            const isExpandable = checkIsExpandable(st.name, STATE.selectedLineId);
+            const isFestival = STATE.festival && STATE.festival.stationName === st.name;
+            const isDanger = st.waiting >= st.maxCap * 0.85;
+
+            let classes = ['station-node'];
+            if (!isUnlocked) classes.push('locked');
+            if (isExpandable) classes.push('expandable');
+            if (isTransfer) classes.push('transfer');
+            if (isFestival) classes.push('festival');
+            if (isDanger && isUnlocked) classes.push('danger');
+
+            let borderColor = '#18181b';
+            if (st.activeLines.length === 1) {
+                borderColor = STATE.lines[st.activeLines[0]].color;
+            } else if (!isUnlocked && STATE.selectedLineId && st.lines.includes(STATE.selectedLineId)) {
+                borderColor = STATE.lines[STATE.selectedLineId].color;
+            }
+
+            const size = isTransfer ? 22 : (isUnlocked ? 18 : (isExpandable ? 17 : 10));
+            const label = isUnlocked && st.waiting > 0 ? st.waiting : '';
+
+            return L.divIcon({
+                className: '',
+                html: `<div class="${classes.join(' ')}" style="width:${size}px;height:${size}px;border-color:${borderColor};">${label}</div>`,
+                iconSize: [size, size],
+                iconAnchor: [size / 2, size / 2]
+            });
+        }
+
+        function updateAllStationMarkers() {
+            Object.values(STATE.stations).forEach(st => {
+                if (stationMarkers[st.name]) {
+                    stationMarkers[st.name].setIcon(createStationIcon(st));
+                }
+            });
+        }
+
+        function updateAllPolylines() {
+            Object.values(STATE.lines).forEach(line => {
+                const coords = line.activeIndices.map(idx => {
+                    const st = STATE.stations[line.allStations[idx]];
+                    return [st.lat, st.lng];
+                });
+                if (line.isLoop && line.activeIndices.length === line.allStations.length) {
+                    const firstSt = STATE.stations[line.allStations[line.activeIndices[0]]];
+                    coords.push([firstSt.lat, firstSt.lng]);
+                }
+                linePolylines[line.id].setLatLngs(coords);
+            });
+        }
+
+        function spawnFloatingIncome(lat, lng, amount) {
+            const popupMarker = L.marker([lat, lng], {
+                icon: L.divIcon({
+                    className: '',
+                    html: `<div class="floating-income">+₩${amount}</div>`,
+                    iconSize: [60, 20],
+                    iconAnchor: [30, 18]
+                }),
+                interactive: false
+            }).addTo(map);
+
+            setTimeout(() => {
+                if (map && popupMarker) map.removeLayer(popupMarker);
+            }, 1250);
+        }
+
+        /*************************************************************************
+         * 5. 노선 개통 및 인접 역 확장
+         *************************************************************************/
+        function getExpandableIndices(line) {
+            const N = line.allStations.length;
+            if (line.activeIndices.length === 0) return line.allStations.map((_, i) => i);
+            if (line.activeIndices.length >= N) return [];
+
+            const first = line.activeIndices[0];
+            const last = line.activeIndices[line.activeIndices.length - 1];
+            const candidates = new Set();
+
+            if (line.isLoop) {
+                candidates.add((first - 1 + N) % N);
+                candidates.add((last + 1) % N);
+            } else {
+                if (first > 0) candidates.add(first - 1);
+                if (last < N - 1) candidates.add(last + 1);
+            }
+            return Array.from(candidates);
+        }
+
+        function checkIsExpandable(stationName, lineId) {
+            if (!lineId) return false;
+            const line = STATE.lines[lineId];
+            const idx = line.allStations.indexOf(stationName);
+            if (idx === -1) return false;
+
+            if (line.activeIndices.length === 0) {
+                if (STATE.firstPickStation === null) return true;
+                const firstIdx = line.allStations.indexOf(STATE.firstPickStation);
+                const N = line.allStations.length;
+                if (line.isLoop) {
+                    return idx === (firstIdx - 1 + N) % N || idx === (firstIdx + 1) % N;
+                }
+                return Math.abs(idx - firstIdx) === 1;
+            }
+            return getExpandableIndices(line).includes(idx);
+        }
+
+        function getExpansionCost(line, stationName) {
+            const st = STATE.stations[stationName];
+            return 400 + (line.activeIndices.length * 40) + (st.activeLines.length > 0 ? 150 : 0);
+        }
+
+        function onStationClick(stationName) {
+            const line = STATE.lines[STATE.selectedLineId];
+
+            if (line && line.activeIndices.length === 0 && line.allStations.includes(stationName)) {
+                if (!STATE.firstPickStation) {
+                    STATE.firstPickStation = stationName;
+                    setGuide(`[${line.name}] 시작 역 '${stationName}' 선택됨! 바로 이웃한 역을 클릭해 첫 구간을 개통하세요.`);
+                    updateAllStationMarkers();
+                    openInspector(stationName);
+                    return;
+                } else if (STATE.firstPickStation === stationName) {
+                    STATE.firstPickStation = null;
+                    updateAllStationMarkers();
+                    return;
+                } else if (checkIsExpandable(stationName, line.id)) {
+                    const activeLinesCount = Object.values(STATE.lines).filter(l => l.activeIndices.length > 0).length;
+                    const initCost = activeLinesCount === 0 ? 0 : 700;
+                    if (STATE.money < initCost) {
+                        setGuide(`예산이 부족합니다! 새 노선 개통에는 ₩${initCost}이 필요합니다.`);
+                        return;
+                    }
+
+                    STATE.money -= initCost;
+                    const idx1 = line.allStations.indexOf(STATE.firstPickStation);
+                    const idx2 = line.allStations.indexOf(stationName);
+                    line.activeIndices = idx1 < idx2 ? [idx1, idx2] : [idx2, idx1];
+
+                    activateStationForLine(STATE.firstPickStation, line.id);
+                    activateStationForLine(stationName, line.id);
+                    STATE.firstPickStation = null;
+
+                    spawnTrain(line.id, false);
+                    setGuide(`🎉 [${line.name}] 첫 구간 개통 완료! 이제 양끝 노란색 역을 클릭하여 노선을 확장하세요.`);
+
+                    updateAllPolylines();
+                    updateAllStationMarkers();
+                    renderLineTabs();
+                    selectLine(line.id);
+                    openInspector(stationName);
+                    updateUI();
+                    return;
+                }
+            }
+
+            openInspector(stationName);
+        }
+
+        function expandStation(stationName, lineId) {
+            const line = STATE.lines[lineId];
+            if (!checkIsExpandable(stationName, lineId)) return;
+
+            const cost = getExpansionCost(line, stationName);
+            if (STATE.money < cost) return;
+
+            STATE.money -= cost;
+            const idx = line.allStations.indexOf(stationName);
+            const N = line.allStations.length;
+            const first = line.activeIndices[0];
+            const last = line.activeIndices[line.activeIndices.length - 1];
+
+            if (line.isLoop) {
+                if (idx === (first - 1 + N) % N) line.activeIndices.unshift(idx);
+                else line.activeIndices.push(idx);
+            } else {
+                if (idx === first - 1) {
+                    line.activeIndices.unshift(idx);
+                    STATE.trains.filter(t => t.lineId === lineId).forEach(t => t.stepIndex += 1);
+                } else if (idx === last + 1) {
+                    line.activeIndices.push(idx);
+                }
+            }
+
+            activateStationForLine(stationName, lineId);
+            updateAllPolylines();
+            updateAllStationMarkers();
+            renderLineTabs();
+            openInspector(stationName);
+            updateUI();
+        }
+
+        function activateStationForLine(stationName, lineId) {
+            const st = STATE.stations[stationName];
+            if (!st.activeLines.includes(lineId)) {
+                st.activeLines.push(lineId);
+                if (st.activeLines.length >= 2) {
+                    st.maxCap += 25;
+                    pushNews(`🔄 '${stationName}' 역이 환승역으로 승격되어 수용량이 증가했습니다!`, "TRANSFER");
+                }
+            }
+            refreshStationTooltip(st);
+        }
+
+        /*************************************************************************
+         * 6. 열차 가감속(Ease-in-out) 및 정차(Dwell Time) 시뮬레이션
+         *************************************************************************/
+        function spawnTrain(lineId, isVip = false) {
+            const line = STATE.lines[lineId];
+            if (!line || line.activeIndices.length < 2) return;
+
+            const train = {
+                id: 'tr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+                lineId,
+                stepIndex: 0,
+                progress: 0,
+                direction: 1,
+                passengers: 0,
+                stopTimer: 1.0,
+                isVip
+            };
+
+            STATE.trains.push(train);
+            line.trainCount += 1;
+            createTrainMarker(train);
+        }
+
+        function createTrainMarker(train) {
+            const line = STATE.lines[train.lineId];
+            const stName = line.allStations[line.activeIndices[train.stepIndex] || line.activeIndices[0]];
+            const st = STATE.stations[stName];
+
+            const marker = L.marker([st.lat, st.lng], {
+                icon: buildTrainIcon(train, line),
+                zIndexOffset: 500
+            }).addTo(map);
+
+            trainMarkers[train.id] = marker;
+        }
+
+        function buildTrainIcon(train, line) {
+            const isStopped = train.stopTimer > 0;
+            const classes = ['train-node'];
+            if (isStopped) classes.push('stopped');
+            if (train.isVip) classes.push('vip');
+
+            return L.divIcon({
+                className: '',
+                html: `<div class="${classes.join(' ')}" style="width:24px;height:15px;background:${line.color};">${train.passengers}</div>`,
+                iconSize: [24, 15],
+                iconAnchor: [12, 7.5]
+            });
+        }
+
+        function easeInOutSine(t) {
+            return -(Math.cos(Math.PI * t) - 1) / 2;
+        }
+
+        function getTrainCap(line) {
+            return 25 + (line.capLv - 1) * 15;
+        }
+
+        let lastTick = performance.now();
+        let spawnAcc = 0;
+        let secAcc = 0;
+
+        function startLoop() {
+            lastTick = performance.now();
+            requestAnimationFrame(gameTick);
+        }
+
+        function gameTick(now) {
+            const rawDt = (now - lastTick) / 1000;
+            lastTick = now;
+
+            if (STATE.gameSpeed > 0 && STATE.mapId) {
+                const dt = Math.min(rawDt, 0.1) * STATE.gameSpeed;
+                updateSimulation(dt);
+            }
+            requestAnimationFrame(gameTick);
+        }
+
+        function updateSimulation(dt) {
+            secAcc += dt;
+            if (secAcc >= 1.0) {
+                secAcc -= 1.0;
+                STATE.gameMinutes += 12;
+
+                if (STATE.gameMinutes >= 1440) {
+                    STATE.gameMinutes = 0;
+                    STATE.day += 1;
+
+                    if (STATE.day % 7 === 0) {
+                        setGameSpeed(0);
+                        const wModal = document.getElementById('weekly-modal');
+                        wModal.classList.remove('hidden');
+                        wModal.classList.add('flex');
+                    }
+                }
+
+                if (STATE.festival) {
+                    STATE.festival.remainingSec -= 1;
+                    if (STATE.festival.remainingSec <= 0) {
+                        pushNews(`🎉 [${STATE.festival.stationName}역] 축제가 종료되어 평시 수송 체계로 복귀합니다.`, "NEWS");
+                        STATE.festival = null;
+                        updateAllStationMarkers();
+                    }
+                } else if (Math.random() < 0.04) {
+                    triggerFestivalOrNews();
+                }
+
+                if (STATE.expressSec > 0) STATE.expressSec -= 1;
+                updateUI();
+            }
+
+            spawnAcc += dt;
+            if (spawnAcc >= 1.2) {
+                spawnAcc -= 1.2;
+                const hour = Math.floor(STATE.gameMinutes / 60);
+                const isRush = (hour >= 7 && hour <= 9) || (hour >= 18 && hour <= 20);
+
+                Object.values(STATE.stations).forEach(st => {
+                    if (st.activeLines.length === 0) return;
+
+                    let rate = 1 + (st.activeLines.length > 1 ? 1.1 : 0);
+                    if (isRush) rate *= 1.65;
+                    if (STATE.festival && STATE.festival.stationName === st.name) rate *= 3.2;
+
+                    if (Math.random() < 0.65) {
+                        st.waiting = Math.min(st.maxCap + 8, st.waiting + Math.ceil(Math.random() * rate));
+                    }
+
+                    if (st.waiting >= st.maxCap) {
+                        st.overloadTimer += 1.2;
+                        STATE.rating = Math.max(0, STATE.rating - 1);
+                        if (STATE.rating <= 0 || st.overloadTimer >= 22) {
+                            handleGameOver(st.name);
+                        }
+                    } else {
+                        st.overloadTimer = Math.max(0, st.overloadTimer - 0.8);
+                    }
+                });
+
+                updateAllStationMarkers();
+                if (STATE.inspectedStation) refreshInspector();
+            }
+
+            const expressMult = STATE.expressSec > 0 ? 1.75 : 1.0;
+
+            STATE.trains.forEach(train => {
+                const line = STATE.lines[train.lineId];
+                const N = line.activeIndices.length;
+                if (N < 2) return;
+
+                if (train.stopTimer > 0) {
+                    train.stopTimer -= dt;
+                    const currSt = STATE.stations[line.allStations[line.activeIndices[train.stepIndex]]];
+                    if (currSt && trainMarkers[train.id]) {
+                        trainMarkers[train.id].setLatLng([currSt.lat, currSt.lng]);
+                        trainMarkers[train.id].setIcon(buildTrainIcon(train, line));
+                    }
+                    return;
+                }
+
+                const baseSpeed = (0.45 + (line.speedLv - 1) * 0.15) * expressMult * (train.isVip ? 1.25 : 1.0);
+                train.progress += baseSpeed * dt;
+
+                if (train.progress >= 1.0) {
+                    train.progress = 0;
+                    train.stopTimer = 1.15;
+
+                    const isFullLoop = line.isLoop && N === line.allStations.length;
+                    let nextStep = train.stepIndex + train.direction;
+
+                    if (isFullLoop) {
+                        nextStep = (nextStep + N) % N;
+                    } else {
+                        if (nextStep >= N) {
+                            train.direction = -1;
+                            nextStep = N - 2;
+                        } else if (nextStep < 0) {
+                            train.direction = 1;
+                            nextStep = 1;
+                        }
+                    }
+
+                    train.stepIndex = nextStep;
+                    const arrivedName = line.allStations[line.activeIndices[train.stepIndex]];
+                    const st = STATE.stations[arrivedName];
+
+                    if (train.passengers > 0) {
+                        const drop = Math.ceil(train.passengers * (st.activeLines.length >= 2 ? 0.75 : 0.5));
+                        train.passengers -= drop;
+                        STATE.totalPassengers += drop;
+
+                        let fare = 18 + (st.activeLines.length >= 2 ? 7 : 0);
+                        if (train.isVip) fare *= 2.5;
+                        if (STATE.festival && STATE.festival.stationName === st.name) fare *= 2.0;
+
+                        const earned = Math.round(drop * fare);
+                        STATE.money += earned;
+                        STATE.rating = Math.min(100, STATE.rating + 1);
+
+                        spawnFloatingIncome(st.lat, st.lng, earned);
+                    }
+
+                    const cap = getTrainCap(line);
+                    const space = cap - train.passengers;
+                    if (space > 0 && st.waiting > 0) {
+                        const board = Math.min(space, st.waiting);
+                        st.waiting -= board;
+                        train.passengers += board;
+                    }
+
+                    updateAllStationMarkers();
+                }
+
+                const isFullLoop = line.isLoop && N === line.allStations.length;
+                let targetStep = train.stepIndex + train.direction;
+                if (isFullLoop) {
+                    targetStep = (targetStep + N) % N;
+                } else {
+                    if (targetStep >= N) targetStep = N - 2;
+                    if (targetStep < 0) targetStep = 1;
+                }
+
+                const currSt = STATE.stations[line.allStations[line.activeIndices[train.stepIndex]]];
+                const nextSt = STATE.stations[line.allStations[line.activeIndices[targetStep]]];
+
+                if (currSt && nextSt && trainMarkers[train.id]) {
+                    const easedT = easeInOutSine(train.progress);
+                    const lat = currSt.lat + (nextSt.lat - currSt.lat) * easedT;
+                    const lng = currSt.lng + (nextSt.lng - currSt.lng) * easedT;
+                    trainMarkers[train.id].setLatLng([lat, lng]);
+                    trainMarkers[train.id].setIcon(buildTrainIcon(train, line));
+                }
+            });
+        }
+
+        function claimWeeklyReward(type) {
+            const wModal = document.getElementById('weekly-modal');
+            wModal.classList.add('hidden');
+            wModal.classList.remove('flex');
+
+            if (type === 'train') {
+                const activeLines = Object.values(STATE.lines).filter(l => l.activeIndices.length >= 2);
+                const targetLine = STATE.lines[STATE.selectedLineId]?.activeIndices.length >= 2
+                    ? STATE.lines[STATE.selectedLineId]
+                    : activeLines[0];
+
+                if (targetLine) {
+                    spawnTrain(targetLine.id, false);
+                    pushNews(`🎁 주간 보상으로 [${targetLine.name}]에 신형 전동차 1대가 무료 투입되었습니다!`, "REWARD");
+                } else {
+                    STATE.money += 2000;
+                }
+            } else {
+                STATE.money += 2000;
+                pushNews(`🎁 주간 보상으로 특별 교통 교부금 ₩2,000이 지급되었습니다!`, "REWARD");
+            }
+            setGameSpeed(1);
+            selectLine(STATE.selectedLineId);
+            updateUI();
+        }
+
+        /*************************************************************************
+         * 7. 업그레이드, 특수 지령 & 이벤트
+         *************************************************************************/
+        function buyTrain() {
+            const line = STATE.lines[STATE.selectedLineId];
+            if (!line || line.activeIndices.length < 2) return;
+            const cost = 1100 + line.trainCount * 500;
+            if (STATE.money < cost) return;
+            STATE.money -= cost;
+            spawnTrain(line.id, false);
+            selectLine(line.id);
+            updateUI();
+        }
+
+        function upgradeLineSpeed() {
+            const line = STATE.lines[STATE.selectedLineId];
+            if (!line || line.activeIndices.length < 2) return;
+            const cost = 900 * line.speedLv;
+            if (STATE.money < cost) return;
+            STATE.money -= cost;
+            line.speedLv += 1;
+            selectLine(line.id);
+            updateUI();
+        }
+
+        function upgradeLineCapacity() {
+            const line = STATE.lines[STATE.selectedLineId];
+            if (!line || line.activeIndices.length < 2) return;
+            const cost = 800 * line.capLv;
+            if (STATE.money < cost) return;
+            STATE.money -= cost;
+            line.capLv += 1;
+            selectLine(line.id);
+            updateUI();
+        }
+
+        function upgradeStationCap(stationName) {
+            const st = STATE.stations[stationName];
+            const cost = 600 * st.level;
+            if (STATE.money < cost) return;
+            STATE.money -= cost;
+            st.level += 1;
+            st.maxCap += 30;
+            openInspector(stationName);
+            updateAllStationMarkers();
+            updateUI();
+        }
+
+        function useSkill(type) {
+            if (type === 'express') {
+                if (STATE.money < 1200) return;
+                STATE.money -= 1200;
+                STATE.expressSec = 30;
+                pushNews(`⚡ [특수 지령] 30초간 전 노선 급행 다이어 가동! 열차 주행 속도가 1.75배 빨라집니다.`, "SKILL");
+            } else if (type === 'vip') {
+                const line = STATE.lines[STATE.selectedLineId];
+                if (!line || line.activeIndices.length < 2 || STATE.money < 1500) {
+                    setGuide(`황금관광열차를 투입하려면 개통된 노선을 선택하고 ₩1,500이 있어야 합니다.`);
+                    return;
+                }
+                STATE.money -= 1500;
+                spawnTrain(line.id, true);
+                pushNews(`👑 [특수 지령] [${line.name}]에 요금 2.5배를 창출하는 VIP 황금관광열차가 투입되었습니다!`, "VIP");
+                selectLine(line.id);
+            } else if (type === 'clear') {
+                if (STATE.money < 1800) return;
+                STATE.money -= 1800;
+                Object.values(STATE.stations).forEach(st => {
+                    st.waiting = Math.floor(st.waiting * 0.4);
+                    st.overloadTimer = 0;
+                });
+                STATE.rating = Math.min(100, STATE.rating + 15);
+                pushNews(`🚌 [특수 지령] 비상 전세버스 긴급 투입! 모든 역의 대기 승객이 절반 이하로 해소되었습니다.`, "SKILL");
+                updateAllStationMarkers();
+            }
+            updateUI();
+        }
+
+        function triggerFestivalOrNews() {
+            const mapCfg = GAME_MAPS[STATE.mapId];
+            const activeStations = Object.values(STATE.stations).filter(s => s.activeLines.length > 0);
+            if (activeStations.length === 0) return;
+
+            const matched = mapCfg.festivals.filter(f => STATE.stations[f.station] && STATE.stations[f.station].activeLines.length > 0);
+            let chosenSt, title;
+
+            if (matched.length > 0) {
+                const pick = matched[Math.floor(Math.random() * matched.length)];
+                chosenSt = pick.station;
+                title = pick.title;
+            } else {
+                const rand = activeStations[Math.floor(Math.random() * activeStations.length)];
+                chosenSt = rand.name;
+                title = `🎪 [${chosenSt}역] 역세권 거리문화 축제 개막! 승객 증가 및 요금 2배!`;
+            }
+
+            STATE.festival = { stationName: chosenSt, title, remainingSec: 35 };
+            pushNews(title, "FESTIVAL");
+            updateAllStationMarkers();
+        }
+
+        function pushNews(text, badgeText = "NEWS") {
+            document.getElementById('news-text').innerText = text;
+            document.getElementById('news-badge').innerText = badgeText;
+        }
+
+        function handleGameOver(stationName) {
+            setGameSpeed(0);
+            alert(`🚨 [시민 만족도 붕괴 : 본부장 해임]\n\n'${stationName}' 역의 극심한 혼잡이 방치되어 운영 본부장에서 해임되었습니다.\n\n• 누적 수송 승객: ${STATE.totalPassengers.toLocaleString()}명\n• 운영 일수: Day ${STATE.day}`);
+            returnToMainMenu();
+        }
+
+        /*************************************************************************
+         * 8. UI 업데이트 및 인스펙터 마무리
+         *************************************************************************/
+        function renderLineTabs() {
+            const container = document.getElementById('line-tabs');
+            container.innerHTML = '';
+            let activeCount = 0;
+
+            Object.values(STATE.lines).forEach(line => {
+                const isStarted = line.activeIndices.length > 0;
+                if (isStarted) activeCount++;
+                const isSelected = STATE.selectedLineId === line.id;
+
+                const btn = document.createElement('button');
+                btn.onclick = () => selectLine(line.id);
+                btn.className = `py-1.5 px-2.5 rounded-xl text-xs font-extrabold flex items-center justify-between border transition ${
+                    isSelected ? 'bg-zinc-900 border-zinc-900 text-white shadow-md' : 'bg-zinc-100 border-zinc-200 text-zinc-700 hover:bg-zinc-200/70'
+                }`;
+                btn.innerHTML = `
+                    <span class="flex items-center gap-1.5 truncate">
+                        <span class="w-4 h-4 rounded-sm flex items-center justify-center text-[9px] font-black text-white shrink-0" style="background:${line.color}">${line.badge}</span>
+                        <span class="truncate">${line.name}</span>
+                    </span>
+                    <span class="text-[10px] ${isStarted ? (isSelected ? 'text-amber-300' : 'text-indigo-600') : 'text-zinc-400'}">${isStarted ? line.activeIndices.length + '역' : '미개통'}</span>
+                `;
+                container.appendChild(btn);
+            });
+
+            document.getElementById('active-lines-count').innerText = `개통 노선: ${activeCount}개`;
+        }
+
+        function selectLine(lineId) {
+            STATE.selectedLineId = lineId;
+            STATE.firstPickStation = null;
+            const line = STATE.lines[lineId];
+            if (!line) return;
+
+            renderLineTabs();
+            updateAllStationMarkers();
+
+            document.getElementById('selected-line-dot').style.background = line.color;
+            document.getElementById('selected-line-name').innerText = line.name;
+
+            const isStarted = line.activeIndices.length > 0;
+            const statusEl = document.getElementById('selected-line-status');
+            statusEl.innerText = isStarted ? `${line.activeIndices.length}/${line.allStations.length}역 운행중` : '미개통 (연속 2개역 클릭)';
+
+            document.getElementById('line-stat-trains').innerText = line.trainCount;
+            document.getElementById('line-stat-speed').innerText = line.speedLv;
+            document.getElementById('line-stat-cap').innerText = getTrainCap(line);
+
+            const costTrain = 1100 + line.trainCount * 500;
+            const costSpeed = 900 * line.speedLv;
+            const costCap = 800 * line.capLv;
+
+            document.getElementById('cost-train').innerText = costTrain.toLocaleString();
+            document.getElementById('cost-speed').innerText = costSpeed.toLocaleString();
+            document.getElementById('cost-cap').innerText = costCap.toLocaleString();
+
+            document.getElementById('btn-buy-train').disabled = !isStarted || STATE.money < costTrain;
+            document.getElementById('btn-up-speed').disabled = !isStarted || STATE.money < costSpeed;
+            document.getElementById('btn-up-cap').disabled = !isStarted || STATE.money < costCap;
+        }
+
+        function openInspector(stationName) {
+            STATE.inspectedStation = stationName;
+            const panel = document.getElementById('station-inspector');
+            panel.classList.remove('hidden');
+            panel.classList.add('flex');
+            refreshInspector();
+        }
+
+        function refreshInspector() {
+            const stationName = STATE.inspectedStation;
+            if (!stationName) return;
+            const st = STATE.stations[stationName];
+
+            document.getElementById('insp-name').innerText = st.name + '역';
+            document.getElementById('insp-transfer-badge').classList.toggle('hidden', st.activeLines.length < 2);
+            document.getElementById('insp-festival-badge').classList.toggle('hidden', !(STATE.festival && STATE.festival.stationName === st.name));
+            document.getElementById('insp-lines').innerText = `노선: ${st.lines.map(id => STATE.lines[id].name).join(' · ')}`;
+
+            document.getElementById('insp-waiting').innerText = st.waiting;
+            document.getElementById('insp-max').innerText = st.maxCap;
+
+            const pct = Math.min(100, Math.round((st.waiting / st.maxCap) * 100));
+            const bar = document.getElementById('insp-bar');
+            bar.style.width = pct + '%';
+            bar.className = `h-full transition-all duration-300 ${pct >= 85 ? 'bg-rose-600' : 'bg-indigo-600'}`;
+
+            const actions = document.getElementById('insp-actions');
+            actions.innerHTML = '';
+
+            if (STATE.selectedLineId && checkIsExpandable(stationName, STATE.selectedLineId)) {
+                const line = STATE.lines[STATE.selectedLineId];
+                if (line.activeIndices.length > 0) {
+                    const cost = getExpansionCost(line, stationName);
+                    const btn = document.createElement('button');
+                    btn.onclick = () => expandStation(stationName, line.id);
+                    btn.disabled = STATE.money < cost;
+                    btn.className = "w-full py-2 px-3 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-zinc-900 font-black text-xs flex justify-between items-center transition shadow";
+                    btn.innerHTML = `<span><i class="fas fa-hammer mr-1"></i> [${line.name}] 이 역으로 연장</span><span>₩${cost.toLocaleString()}</span>`;
+                    actions.appendChild(btn);
+                }
+            }
+
+            if (st.activeLines.length > 0) {
+                const upCost = 600 * st.level;
+                const upBtn = document.createElement('button');
+                upBtn.onclick = () => upgradeStationCap(stationName);
+                upBtn.disabled = STATE.money < upCost;
+                upBtn.className = "w-full py-2 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-700 disabled:opacity-40 text-white font-bold text-xs flex justify-between items-center transition";
+                upBtn.innerHTML = `<span><i class="fas fa-expand-arrows-alt text-amber-400 mr-1"></i> 승강장 증축 (Lv.${st.level} → 정원+30)</span><span class="text-amber-300">₩${upCost.toLocaleString()}</span>`;
+                actions.appendChild(upBtn);
+            }
+        }
+
+        function closeInspector() {
+            STATE.inspectedStation = null;
+            const panel = document.getElementById('station-inspector');
+            panel.classList.add('hidden');
+            panel.classList.remove('flex');
+        }
+
+        function updateUI() {
+            if (!STATE.mapId) return;
+            document.getElementById('stat-money').innerText = STATE.money.toLocaleString();
+            document.getElementById('stat-passengers').innerText = STATE.totalPassengers.toLocaleString();
+            document.getElementById('stat-rating').innerText = STATE.rating;
+
+            const h = String(Math.floor(STATE.gameMinutes / 60)).padStart(2, '0');
+            const m = String(STATE.gameMinutes % 60).padStart(2, '0');
+            document.getElementById('hud-time').innerText = `Day ${STATE.day} (${h}:${m})`;
+
+            const hour = Math.floor(STATE.gameMinutes / 60);
+            const isRush = (hour >= 7 && hour <= 9) || (hour >= 18 && hour <= 20);
+            document.getElementById('rush-badge').classList.toggle('hidden', !isRush);
+
+            const festTimer = document.getElementById('festival-timer');
+            if (STATE.festival) {
+                festTimer.classList.remove('hidden');
+                festTimer.innerText = `🎉 ${STATE.festival.stationName}역 축제 (${STATE.festival.remainingSec}s)`;
+            } else {
+                festTimer.classList.add('hidden');
+            }
+
+            if (STATE.selectedLineId) {
+                const line = STATE.lines[STATE.selectedLineId];
+                const isStarted = line && line.activeIndices.length > 0;
+                if (line) {
+                    document.getElementById('btn-buy-train').disabled = !isStarted || STATE.money < (1100 + line.trainCount * 500);
+                    document.getElementById('btn-up-speed').disabled = !isStarted || STATE.money < (900 * line.speedLv);
+                    document.getElementById('btn-up-cap').disabled = !isStarted || STATE.money < (800 * line.capLv);
+                }
+            }
+        }
+
+        function setGuide(text) {
+            document.getElementById('guide-text').innerText = text;
+        }
+
+        function setGameSpeed(speed) {
+            STATE.gameSpeed = speed;
+            [0, 1, 2, 4].forEach(s => {
+                const btn = document.getElementById('btn-speed-' + s);
+                if (!btn) return;
+                if (s === speed) {
+                    btn.className = "w-8 h-8 rounded-xl flex items-center justify-center bg-zinc-900 text-white font-black text-xs transition";
+                } else {
+                    btn.className = "w-8 h-8 rounded-xl flex items-center justify-center hover:bg-zinc-100 text-zinc-500 font-black text-xs transition";
+                }
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            renderMainMenu();
+            startLoop();
+        });
+/*************************************************************************
+         * 9. [확장팩 패치] Web Audio 브금/효과음 + 뉴스 기록장 + 하드코어 밸런스 + 상가/미션
+         *************************************************************************/
+        let audioCtx = null;
+        let soundEnabled = false;
+        let bgmInterval = null;
+        let NEWS_LOGS = [];
+
+        // 미니 메트로 스타일 앰비언트 신디사이저 사운드 엔진
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        }
+
+        function playTone(freq, type = 'sine', duration = 0.4, vol = 0.08, delay = 0) {
+            if (!soundEnabled || !audioCtx) return;
+            setTimeout(() => {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+                gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(vol, audioCtx.currentTime + 0.03);
+                gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + duration);
+
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            }, delay * 1000);
+        }
+
+        function playSFX(kind) {
+            if (!soundEnabled) return;
+            if (kind === 'build') {
+                // 역 건설: 경쾌한 마림바 2음
+                playTone(523.25, 'triangle', 0.25, 0.12, 0);
+                playTone(659.25, 'triangle', 0.35, 0.12, 0.08);
+            } else if (kind === 'newLine') {
+                // 신규 노선 개통: 서울 지하철 차임벨 화음 (도-미-솔-도)
+                playTone(523.25, 'sine', 0.4, 0.12, 0);
+                playTone(659.25, 'sine', 0.4, 0.12, 0.14);
+                playTone(783.99, 'sine', 0.4, 0.12, 0.28);
+                playTone(1046.50, 'sine', 0.7, 0.14, 0.42);
+            } else if (kind === 'coin') {
+                // 요금 수익: 맑은 벨 소리
+                playTone(1174.66, 'sine', 0.18, 0.04, 0);
+                playTone(1567.98, 'sine', 0.25, 0.04, 0.05);
+            } else if (kind === 'alert') {
+                // 축제/뉴스/경고음
+                playTone(440, 'sawtooth', 0.2, 0.06, 0);
+                playTone(554.37, 'sawtooth', 0.3, 0.06, 0.15);
+            }
+        }
+
+        function toggleSound() {
+            initAudio();
+            soundEnabled = !soundEnabled;
+            const btn = document.getElementById('btn-sound');
+            if (soundEnabled) {
+                btn.innerHTML = `<i class="fas fa-volume-up text-emerald-600"></i> 브금 ON`;
+                btn.className = "px-2.5 h-8 rounded-xl bg-emerald-100 hover:bg-emerald-200 text-emerald-900 text-[11px] font-extrabold flex items-center gap-1 transition";
+                playSFX('newLine');
+                // 미니 메트로 풍 몽환적인 펜타토닉 앰비언트 BGM 자동 생성 루프
+                const scale = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25];
+                bgmInterval = setInterval(() => {
+                    if (!soundEnabled || STATE.gameSpeed === 0) return;
+                    const note1 = scale[Math.floor(Math.random() * scale.length)];
+                    const note2 = scale[Math.floor(Math.random() * scale.length)] * 0.5;
+                    playTone(note1, 'sine', 2.4, 0.025, 0);
+                    if (Math.random() < 0.6) playTone(note2, 'triangle', 3.0, 0.02, 0.4);
+                }, 2200);
+            } else {
+                btn.innerHTML = `<i class="fas fa-volume-mute text-zinc-500"></i> 사운드켜기`;
+                btn.className = "px-2.5 h-8 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[11px] font-extrabold flex items-center gap-1 transition";
+                if (bgmInterval) clearInterval(bgmInterval);
+            }
+        }
+
+        // 지난 뉴스 아카이브 기록 시스템
+        pushNews = function(text, badgeText = "NEWS") {
+            document.getElementById('news-text').innerText = text;
+            document.getElementById('news-badge').innerText = badgeText;
+
+            const h = String(Math.floor((STATE.gameMinutes || 360) / 60)).padStart(2, '0');
+            const m = String((STATE.gameMinutes || 360) % 60).padStart(2, '0');
+            NEWS_LOGS.unshift({
+                time: `Day ${STATE.day || 1} (${h}:${m})`,
+                badge: badgeText,
+                text: text
+            });
+            if (NEWS_LOGS.length > 50) NEWS_LOGS.pop();
+            if (badgeText === "FESTIVAL" || badgeText === "ALERT") playSFX('alert');
+        };
+
+        function toggleNewsHistory(show) {
+            const modal = document.getElementById('news-history-modal');
+            if (!modal) return;
+            if (show) {
+                const list = document.getElementById('news-history-list');
+                list.innerHTML = NEWS_LOGS.length === 0
+                    ? `<div class="text-center text-zinc-400 py-8">아직 기록된 뉴스가 없습니다.</div>`
+                    : NEWS_LOGS.map(item => `
+                        <div class="p-3 rounded-2xl bg-zinc-50 border border-zinc-200 flex items-start gap-2.5">
+                            <span class="px-2 py-0.5 rounded bg-zinc-800 text-white text-[10px] font-black shrink-0 mt-0.5">${item.badge}</span>
+                            <div class="flex-1">
+                                <div class="text-[10px] font-bold text-zinc-400">${item.time}</div>
+                                <div class="font-bold text-zinc-800 mt-0.5">${item.text}</div>
+                            </div>
+                        </div>
+                    `).join('');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            } else {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        }
+
+        // [하드코어 난이도 패치] 역 연장 비용 상승 & 노선 개통비 대폭 인상
+        getExpansionCost = function(line, stationName) {
+            const st = STATE.stations[stationName];
+            // 역이 길어질수록 터널 굴착비가 기하급수적으로 증가!
+            return 650 + (line.activeIndices.length * 110) + (st.activeLines.length > 0 ? 350 : 0);
+        };
+
+        // 기존 onStationClick의 신규 노선 개통 비용을 3,500원 배수로 대폭 강화
+        const _origOnStationClick = onStationClick;
+        onStationClick = function(stationName) {
+            const line = STATE.lines[STATE.selectedLineId];
+            if (line && line.activeIndices.length === 0 && line.allStations.includes(stationName)) {
+                if (STATE.firstPickStation && STATE.firstPickStation !== stationName && checkIsExpandable(stationName, line.id)) {
+                    const activeLinesCount = Object.values(STATE.lines).filter(l => l.activeIndices.length > 0).length;
+                    // 첫 노선은 무료, 2번째 노선 3,500원, 3번째 노선 7,000원, 4번째 10,500원!
+                    const heavyInitCost = activeLinesCount === 0 ? 0 : activeLinesCount * 3500;
+                    if (STATE.money < heavyInitCost) {
+                        setGuide(`⚠️ [예산 부족] 신규 노선(${line.name}) 초기 착공비로 ₩${heavyInitCost.toLocaleString()}이 필요합니다!`);
+                        playSFX('alert');
+                        return;
+                    }
+                    // 원래 함수에서 700원만 빼던 것을 보정하기 위해 차액 선차감
+                    if (heavyInitCost > 0) STATE.money -= (heavyInitCost - 700);
+                    playSFX('newLine');
+                }
+            }
+            _origOnStationClick(stationName);
+        };
+
+        const _origExpandStation = expandStation;
+        expandStation = function(stationName, lineId) {
+            playSFX('build');
+            _origExpandStation(stationName, lineId);
+            checkMissionProgress();
+        };
+
+        const _origSpawnFloatingIncome = spawnFloatingIncome;
+        spawnFloatingIncome = function(lat, lng, amount) {
+            playSFX('coin');
+            _origSpawnFloatingIncome(lat, lng, amount);
+            checkMissionProgress();
+        };
+
+        // [신규 재미 요소 1] 역세권 지하상가 개발 (인스펙터에 상가 분양 버튼 추가)
+        const _origRefreshInspector = refreshInspector;
+        refreshInspector = function() {
+            _origRefreshInspector();
+            const stationName = STATE.inspectedStation;
+            if (!stationName) return;
+            const st = STATE.stations[stationName];
+            if (st.activeLines.length > 0) {
+                st.mallLv = st.mallLv || 0;
+                const mallCost = 900 + st.mallLv * 700;
+                const actions = document.getElementById('insp-actions');
+                const mallBtn = document.createElement('button');
+                mallBtn.onclick = () => buildStationMall(stationName);
+                mallBtn.disabled = STATE.money < mallCost;
+                mallBtn.className = "w-full py-2 px-3 rounded-xl bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-white font-bold text-xs flex justify-between items-center transition";
+                mallBtn.innerHTML = `<span><i class="fas fa-store text-amber-300 mr-1"></i> 역세권 지하상가 개발 (Lv.${st.mallLv} → 일일수익+₩250)</span><span class="text-amber-200">₩${mallCost.toLocaleString()}</span>`;
+                actions.appendChild(mallBtn);
+            }
+        };
+
+        function buildStationMall(stationName) {
+            const st = STATE.stations[stationName];
+            st.mallLv = st.mallLv || 0;
+            const cost = 900 + st.mallLv * 700;
+            if (STATE.money < cost) return;
+            STATE.money -= cost;
+            st.mallLv += 1;
+            playSFX('build');
+            pushNews(`🏪 [${stationName}역] 지하상가 Lv.${st.mallLv} 분양 완료! 매일 자정 임대 수익이 들어옵니다.`, "MALL");
+            refreshInspector();
+            updateUI();
+        }
+
+        // [신규 재미 요소 2] 본부장 일일 미션 & [하드코어] 자정 유지비/상가수익 정산 및 난이도 스케일링
+        const MISSIONS = [
+            { desc: "개통 역 5개 달성하기", check: () => Object.values(STATE.stations).filter(s => s.activeLines.length > 0).length >= 5, reward: 1200 },
+            { desc: "누적 수송 승객 150명 돌파", check: () => STATE.totalPassengers >= 150, reward: 1500 },
+            { desc: "환승역 1곳 이상 구축하기", check: () => Object.values(STATE.stations).some(s => s.activeLines.length >= 2), reward: 2200 },
+            { desc: "역세권 지하상가 2곳 분양하기", check: () => Object.values(STATE.stations).reduce((acc, s) => acc + (s.mallLv || 0), 0) >= 2, reward: 1800 },
+            { desc: "누적 수송 승객 600명 돌파", check: () => STATE.totalPassengers >= 600, reward: 3000 },
+            { desc: "2개 이상의 노선 운행하기", check: () => Object.values(STATE.lines).filter(l => l.activeIndices.length >= 2).length >= 2, reward: 3500 }
+        ];
+
+        function checkMissionProgress() {
+            STATE.missionIdx = STATE.missionIdx || 0;
+            if (STATE.missionIdx < MISSIONS.length) {
+                const cur = MISSIONS[STATE.missionIdx];
+                if (cur.check()) {
+                    STATE.money += cur.reward;
+                    STATE.missionIdx += 1;
+                    playSFX('newLine');
+                    pushNews(`🎯 [미션 달성] '${cur.desc}' 완료! 국토부 장려금 +₩${cur.reward.toLocaleString()} 지급!`, "MISSION");
+                    updateUI();
+                } else {
+                    setGuide(`🎯 현재 미션: ${cur.desc} (보상: ₩${cur.reward.toLocaleString()}) | 뉴스바를 클릭하면 지난 뉴스를 볼 수 있습니다.`);
+                }
+            }
+        }
+
+        // 매 자정마다 유지비 차감 + 지하상가 임대수익 정산 + 날짜 비례 승객 폭증 패치
+        setInterval(() => {
+            if (!STATE.mapId || STATE.gameSpeed === 0) return;
+
+            // 날짜가 지날수록 승객이 더 가파르게 증가 (하드코어 난이도)
+            const dayDifficulty = Math.min(2.5, 1 + (STATE.day - 1) * 0.18);
+            Object.values(STATE.stations).forEach(st => {
+                if (st.activeLines.length > 0 && Math.random() < 0.35 * STATE.gameSpeed) {
+                    st.waiting = Math.min(st.maxCap + 10, st.waiting + Math.floor(dayDifficulty));
+                }
+            });
+
+            // 자정 근처 정산 체크
+            if (STATE.lastSettledDay !== STATE.day && STATE.day > 1) {
+                STATE.lastSettledDay = STATE.day;
+                const activeStCount = Object.values(STATE.stations).filter(s => s.activeLines.length > 0).length;
+                const totalMallLv = Object.values(STATE.stations).reduce((acc, s) => acc + (s.mallLv || 0), 0);
+
+                const upkeep = (activeStCount * 35) + (STATE.trains.length * 95);
+                const mallIncome = totalMallLv * 250;
+                const net = mallIncome - upkeep;
+                STATE.money += net;
+
+                pushNews(`🌙 [Day ${STATE.day} 일일 정산] 상가수익(+₩${mallIncome}) / 선로·열차 유지비(-₩${upkeep}) ➔ 순변동: ${net >= 0 ? '+' : ''}₩${net}`, "SETTLE");
+                updateUI();
+            }
+        }, 2500);
+/*************************************************************************
+         * 10. [업데이트 패치]
+         * 1) 역 건설 시간 & 즉시 완공 / 2) 복합환승센터 / 3) 세금 미납 압류
+         * 4) 대한민국 전국망(KTX+GTX-A) & 대전1호선 / 5) 신규 이벤트 10종 / 6) 수익 하향 밸런스
+         *************************************************************************/
+
+        // [4번 요청] GTX-A, KTX 경부선, KTX 호남선 노선 DB 추가 및 '대한민국 전국망' 맵 등록
+        ALL_LINES_DB["ktx_gyeongbu"] = {
+            name: "KTX 경부선", badge: "KTX", color: "#003DA5", isLoop: false,
+            stations: buildLineStations(
+                ["서울역","광명","천안아산","오송","대전역","김천구미","서대구","동대구역","경주","울산","부산역"],
+                [{idx:0,lat:37.555,lng:126.972},{idx:1,lat:37.416,lng:126.885},{idx:2,lat:36.794,lng:127.104},{idx:3,lat:36.620,lng:127.327},{idx:4,lat:36.332,lng:127.434},{idx:7,lat:35.879,lng:128.628},{idx:9,lat:35.551,lng:129.138},{idx:10,lat:35.115,lng:129.039}]
+            )
+        };
+        ALL_LINES_DB["ktx_honam"] = {
+            name: "KTX 호남선", badge: "호남", color: "#E6002D", isLoop: false,
+            stations: buildLineStations(
+                ["용산","광명","천안아산","오송","공주","익산","정읍","광주송정역","나주","목포"],
+                [{idx:0,lat:37.529,lng:126.964},{idx:1,lat:37.416,lng:126.885},{idx:3,lat:36.620,lng:127.327},{idx:5,lat:35.940,lng:126.946},{idx:7,lat:35.137,lng:126.791},{idx:9,lat:34.791,lng:126.386}]
+            )
+        };
+        ALL_LINES_DB["gtx_a"] = {
+            name: "GTX-A", badge: "GTX", color: "#9A6292", isLoop: false,
+            stations: buildLineStations(
+                ["운정중앙","킨텍스","대곡","연신내","서울역","삼성","수서","성남","구성","동탄"],
+                [{idx:0,lat:37.725,lng:126.715},{idx:1,lat:37.669,lng:126.745},{idx:2,lat:37.631,lng:126.811},{idx:3,lat:37.619,lng:126.921},{idx:4,lat:37.555,lng:126.972},{idx:5,lat:37.508,lng:127.063},{idx:6,lat:37.487,lng:127.101},{idx:7,lat:37.394,lng:127.126},{idx:9,lat:37.200,lng:127.095}]
+            )
+        };
+
+        // 수도권에 GTX-A 포함 & 대한민국 전체 맵 추가
+        if (!GAME_MAPS.seoul_all.lineKeys.includes("gtx_a")) {
+            GAME_MAPS.seoul_all.lineKeys.push("gtx_a");
+            GAME_MAPS.seoul_all.subtitle = "1~9호선 + 신분당 + 신림 + GTX-A";
+        }
+
+        GAME_MAPS["korea_national"] = {
+            id: "korea_national",
+            category: "전국 광역망 (NEW)",
+            title: "대한민국 올인원",
+            subtitle: "KTX(경부·호남) · GTX-A · 서울·대전·대구·부산·광주 핵심망",
+            center: [36.35, 127.75],
+            zoom: 8,
+            lineKeys: ["ktx_gyeongbu", "ktx_honam", "gtx_a", "s_1", "s_2", "dj_1", "dg_1", "b_1", "gj_1"],
+            festivals: [
+                { station: "서울역", title: "🚄 민족 대이동 명절 귀성 전쟁! 서울역 KTX·GTX 승객 대폭발!" },
+                { station: "대전역", title: "🥐 전국 빵지순례 열풍! KTX 타고 대전역 성심당 인파 운집!" },
+                { station: "부산역", title: "🏖️ 여름 휴가철 KTX 부산행 매진 행렬! 부산역 인파 마비!" },
+                { station: "광주송정역", title: "🎨 남도 미식·비엔날레 관광 주간! 광주송정역 방문객 급증!" }
+            ]
+        };
+
+        // [6번 요청] 돈이 너무 빨리 벌리는 문제 해결!
+        // 요금 수익이 들어올 때마다 68%를 전력비·인건비·운임수수료로 즉시 원천징수하여 실제 순수익을 32%로 대폭 낮춤!
+        const _preTaxSpawnFloatingIncome = spawnFloatingIncome;
+        spawnFloatingIncome = function(lat, lng, amount) {
+            const netEarned = Math.max(5, Math.round(amount * 0.32)); // 기존 수익의 32%만 획득!
+            const deduct = amount - netEarned;
+            STATE.money = Math.max(0, STATE.money - deduct);
+            _preTaxSpawnFloatingIncome(lat, lng, netEarned);
+        };
+
+        // [1번 & 2번 요청] 공사 중인 역 및 복합환승센터 마커 크기/아이콘 처리
+        const _origCreateStationIcon = createStationIcon;
+        createStationIcon = function(st) {
+            // 공사 중인 역인 경우 카운트다운 표시
+            if (st.constructingSec && st.constructingSec > 0) {
+                return L.divIcon({
+                    className: '',
+                    html: `<div class="station-node constructing" style="width:24px;height:24px;">🚧${Math.ceil(st.constructingSec)}</div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+            }
+            // 복합환승센터가 설치된 역은 다른 역보다 훨씬 크게(28px) 황금 링으로 표시!
+            if (st.hasTransferCenter) {
+                const isDanger = st.waiting >= st.maxCap * 0.85;
+                const classes = ['station-node', 'transfer', 'hub-center'];
+                if (isDanger) classes.push('danger');
+                return L.divIcon({
+                    className: '',
+                    html: `<div class="${classes.join(' ')}" style="width:28px;height:28px;">🏢${st.waiting > 0 ? st.waiting : ''}</div>`,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+            }
+            return _origCreateStationIcon(st);
+        };
+
+        // [1번 요청] 새로운 역을 건설하면 15초간 공사가 진행되며, 돈을 내면 즉시 완공!
+        expandStation = function(stationName, lineId) {
+            const line = STATE.lines[lineId];
+            if (!checkIsExpandable(stationName, lineId)) return;
+
+            const cost = getExpansionCost(line, stationName);
+            if (STATE.money < cost) {
+                setGuide(`⚠️ 예산이 부족합니다! '${stationName}' 역 착공에 ₩${cost.toLocaleString()}이 필요합니다.`);
+                playSFX('alert');
+                return;
+            }
+
+            const st = STATE.stations[stationName];
+            if (st.constructingSec && st.constructingSec > 0) {
+                setGuide(`🚧 '${stationName}' 역은 현재 공사 중입니다! (${Math.ceil(st.constructingSec)}초 남음)`);
+                return;
+            }
+
+            STATE.money -= cost;
+            st.constructingSec = 15; // 15초 건설 시간 부여
+            st.constructingLineId = lineId;
+
+            playSFX('build');
+            pushNews(`🚧 [${line.name}] '${stationName}' 역 연장 착공 시작! (완공까지 15초 소요 / 급속 시공 가능)`, "BUILD");
+            updateAllStationMarkers();
+            openInspector(stationName);
+            updateUI();
+        };
+
+        // 공사 완료 실제 개통 처리 함수
+        function finalizeStationConstruction(stationName) {
+            const st = STATE.stations[stationName];
+            if (!st || !st.constructingLineId) return;
+
+            const lineId = st.constructingLineId;
+            const line = STATE.lines[lineId];
+            st.constructingSec = 0;
+            st.constructingLineId = null;
+
+            const idx = line.allStations.indexOf(stationName);
+            const N = line.allStations.length;
+            const first = line.activeIndices[0];
+            const last = line.activeIndices[line.activeIndices.length - 1];
+
+            if (line.isLoop) {
+                if (idx === (first - 1 + N) % N) line.activeIndices.unshift(idx);
+                else line.activeIndices.push(idx);
+            } else {
+                if (idx === first - 1) {
+                    line.activeIndices.unshift(idx);
+                    STATE.trains.filter(t => t.lineId === lineId).forEach(t => t.stepIndex += 1);
+                } else if (idx === last + 1) {
+                    line.activeIndices.push(idx);
+                }
+            }
+
+            activateStationForLine(stationName, lineId);
+            playSFX('newLine');
+            pushNews(`🎉 [${line.name}] '${stationName}' 역 공사가 완료되어 정식 개통되었습니다!`, "OPEN");
+
+            updateAllPolylines();
+            updateAllStationMarkers();
+            renderLineTabs();
+            if (STATE.inspectedStation === stationName) openInspector(stationName);
+            checkMissionProgress();
+            updateUI();
+        }
+
+        // 돈을 내고 즉시 완공(급속 시공)하는 함수
+        function rushConstruction(stationName) {
+            const st = STATE.stations[stationName];
+            if (!st || !st.constructingSec || st.constructingSec <= 0) return;
+            const rushCost = 600;
+            if (STATE.money < rushCost) {
+                setGuide(`⚠️ 급속 시공 비용(₩${rushCost})이 부족합니다!`);
+                playSFX('alert');
+                return;
+            }
+            STATE.money -= rushCost;
+            finalizeStationConstruction(stationName);
+        }
+
+        // [2번 요청] 환승역 전용 '복합환승센터' 건설 함수
+        function buildTransferCenter(stationName) {
+            const st = STATE.stations[stationName];
+            if (!st || st.activeLines.length < 2 || st.hasTransferCenter) return;
+            const hubCost = 2500;
+            if (STATE.money < hubCost) {
+                setGuide(`⚠️ 복합환승센터 건립 예산(₩2,500)이 부족합니다!`);
+                playSFX('alert');
+                return;
+            }
+            STATE.money -= hubCost;
+            st.hasTransferCenter = true;
+            st.maxCap += 60;
+            STATE.rating = Math.min(100, STATE.rating + 15);
+            playSFX('newLine');
+            pushNews(`🏢 [${stationName}역] 광역복합환승센터 준공 완료! 역 크기 확대, 수용량 +60명 및 시민 만족도 대폭 상승!`, "HUB");
+            updateAllStationMarkers();
+            openInspector(stationName);
+            updateUI();
+        }
+
+        // 인스펙터 창에 [급속 시공] 및 [복합환승센터 건립] 버튼 표시
+        const _prevInspectorHook = refreshInspector;
+        refreshInspector = function() {
+            _prevInspectorHook();
+            const stationName = STATE.inspectedStation;
+            if (!stationName) return;
+            const st = STATE.stations[stationName];
+            const actions = document.getElementById('insp-actions');
+
+            // 1) 공사 중인 역이면 [즉시 완공] 버튼 최상단 노출
+            if (st.constructingSec && st.constructingSec > 0) {
+                actions.innerHTML = ''; // 공사 중엔 다른 확장 버튼 숨김
+                const rushBtn = document.createElement('button');
+                rushBtn.onclick = () => rushConstruction(stationName);
+                rushBtn.disabled = STATE.money < 600;
+                rushBtn.className = "w-full py-2.5 px-3 rounded-xl bg-orange-500 hover:bg-orange-400 disabled:opacity-40 text-white font-black text-xs flex justify-between items-center transition shadow-lg animate-pulse";
+                rushBtn.innerHTML = `<span><i class="fas fa-bolt mr-1"></i> 조기 완공 급속 시공 (남은시간: ${Math.ceil(st.constructingSec)}초)</span><span>₩600</span>`;
+                actions.appendChild(rushBtn);
+                return;
+            }
+
+            // 2) 환승역(2개 노선 이상)이면 [복합환승센터] 버튼 추가
+            if (st.activeLines.length >= 2 && !st.hasTransferCenter) {
+                const hubBtn = document.createElement('button');
+                hubBtn.onclick = () => buildTransferCenter(stationName);
+                hubBtn.disabled = STATE.money < 2500;
+                hubBtn.className = "w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 disabled:opacity-40 text-zinc-900 font-black text-xs flex justify-between items-center transition shadow-md";
+                hubBtn.innerHTML = `<span><i class="fas fa-building mr-1"></i> 광역복합환승센터 건립 (정원+60·만족도↑)</span><span>₩2,500</span>`;
+                actions.appendChild(hubBtn);
+            } else if (st.hasTransferCenter) {
+                const badge = document.createElement('div');
+                badge.className = "w-full py-1.5 px-3 rounded-xl bg-amber-100 border border-amber-300 text-amber-900 font-extrabold text-[11px] text-center";
+                badge.innerHTML = `🏢 광역복합환승센터 가동 중 (시민 만족도 지속 회복)`;
+                actions.appendChild(badge);
+            }
+        };
+
+        // [3번 요청: 세금 미납부 이벤트] & [5번 요청: 새로운 다이내믹 이벤트 10종]
+        const TEN_NEW_EVENTS = [
+            {
+                name: "폭설 경보 발령",
+                run: () => {
+                    STATE.expressSec = 0;
+                    pushNews(`❄️ [기상악화] 기록적인 폭설로 지상 구간 선로가 결빙되었습니다! 제설 작업비 -₩450 지출.`, "SNOW");
+                    STATE.money = Math.max(0, STATE.money - 450);
+                }
+            },
+            {
+                name: "철도노조 임금 협상",
+                run: () => {
+                    const cost = 600 + STATE.trains.length * 80;
+                    STATE.money = Math.max(0, STATE.money - cost);
+                    pushNews(`✊ [노사협상] 철도노조 특별 상여금 및 안전 수당 합의 타결! -₩${cost.toLocaleString()} 지출.`, "UNION");
+                }
+            },
+            {
+                name: "K-POP 아이돌 생일 광고 투어",
+                run: () => {
+                    const bonus = 550;
+                    STATE.money += bonus;
+                    pushNews(`🎤 [문화특수] 글로벌 K-POP 스타 지하철 전광판 투어 성지순례 열풍! 광고 수익 +₩${bonus}!`, "KPOP");
+                }
+            },
+            {
+                name: "역세권 대단지 신도시 입주",
+                run: () => {
+                    Object.values(STATE.stations).forEach(st => {
+                        if (st.activeLines.length > 0) st.waiting = Math.min(st.maxCap, st.waiting + 8);
+                    });
+                    pushNews(`🏙️ [인구유입] 역세권 대규모 아파트 단지 입주 시작! 전 역 출퇴근 승객이 급증합니다!`, "CITY");
+                }
+            },
+            {
+                name: "한국전력 산업용 전기요금 인상",
+                run: () => {
+                    const bill = 350 + STATE.trains.length * 110;
+                    STATE.money = Math.max(0, STATE.money - bill);
+                    pushNews(`⚡ [에너지쇼크] 전동차 고압 전력 피크 요금제 할증 부과! 전력비 -₩${bill.toLocaleString()} 납부.`, "POWER");
+                }
+            },
+            {
+                name: "외국인 관광객 프리패스 열풍",
+                run: () => {
+                    STATE.rating = Math.min(100, STATE.rating + 8);
+                    STATE.money += 480;
+                    pushNews(`✈️ [관광특수] 외국인 전용 메트로 패스 판매량 역대 최고치 경신! 수익 +₩480 & 만족도 상승!`, "TOUR");
+                }
+            },
+            {
+                name: "스크린도어(PSD) 정밀 안전점검",
+                run: () => {
+                    const activeCnt = Object.values(STATE.stations).filter(s => s.activeLines.length > 0).length;
+                    const fee = activeCnt * 55;
+                    STATE.money = Math.max(0, STATE.money - fee);
+                    pushNews(`🛠️ [안전점검] 개통된 ${activeCnt}개 역 승강장 스크린도어 센서 긴급 교체 실시 (-₩${fee.toLocaleString()}).`, "SAFETY");
+                }
+            },
+            {
+                name: "관제 신호기 일시 장애",
+                run: () => {
+                    STATE.trains.forEach(t => t.stopTimer = Math.max(t.stopTimer, 3.5));
+                    pushNews(`🚨 [신호장애] 중앙 관제실 무선통신 일시 지연 발생! 모든 열차가 안전을 위해 3.5초간 비상 정차합니다.`, "ALERT");
+                }
+            },
+            {
+                name: "국제 마라톤 도로 전면 통제",
+                run: () => {
+                    Object.values(STATE.stations).forEach(st => {
+                        if (st.activeLines.length > 0) st.waiting = Math.min(st.maxCap + 5, st.waiting + 10);
+                    });
+                    pushNews(`🏃 [교통통제] 시내 마라톤 대회로 버스·도로 전면 통제! 시민들이 일제히 지하철로 몰려듭니다!`, "TRAFFIC");
+                }
+            },
+            {
+                name: "국토교통부 대중교통 경영대상 수상",
+                run: () => {
+                    if (STATE.rating >= 85) {
+                        STATE.money += 900;
+                        pushNews(`🏆 [정부표창] 높은 시민 만족도(${STATE.rating}%)를 인정받아 우수 철도기관 포상금 +₩900 수령!`, "AWARD");
+                    } else {
+                        STATE.rating = Math.max(10, STATE.rating - 5);
+                        pushNews(`📉 [경영경고] 국토부 서비스 평가 미달 지적! 시민 만족도가 5% 하락합니다.`, "WARN");
+                    }
+                }
+            }
+        ];
+
+// [세금 완화 패치] 최소 3일(Day) 간격으로만 세금이 나오고, 세율과 미납 확률을 대폭 축소!
+        triggerTaxAuditEvent = function() {
+            // 같은 날이나 최근 2일 내에 세금을 냈다면 절대 다시 부과하지 않음!
+            if (STATE.lastTaxDay && (STATE.day - STATE.lastTaxDay) < 3) return;
+            STATE.lastTaxDay = STATE.day;
+
+            const activeSt = Object.values(STATE.stations).filter(s => s.activeLines.length > 0).length;
+            if (activeSt < 3) return; // 초반(역 3개 미만)에는 세금 면제!
+
+            // 세율 대폭 인하: 보유 현금의 8% + 역당 15원 + 열차당 30원
+            const taxAmount = Math.round(STATE.money * 0.08) + (activeSt * 15) + (STATE.trains.length * 30);
+
+            if (STATE.money >= taxAmount) {
+                // 행정 착오 세금 미납 확률을 45% -> 12%로 대폭 축소, 가산세도 10%로 완화
+                if (Math.random() < 0.12) {
+                    const penalty = Math.round(taxAmount * 1.1);
+                    STATE.money = Math.max(0, STATE.money - penalty);
+                    STATE.rating = Math.max(10, STATE.rating - 2);
+                    playSFX('alert');
+                    pushNews(`🚔 [세금 납부 지연] 교통시설세 지연 가산세(10%) 포함 -₩${penalty.toLocaleString()}이 징수되었습니다.`, "TAX");
+                } else {
+                    STATE.money -= taxAmount;
+                    pushNews(`🧾 [정기 세금 납부] 선로 사용료 및 법인세 -₩${taxAmount.toLocaleString()} 납부 완료.`, "TAX");
+                }
+            } else {
+                // 돈이 부족할 때도 전액 압류 대신 절반만 차감하고 만족도 소폭 하락으로 완화
+                const seized = Math.floor(STATE.money * 0.5);
+                STATE.money -= seized;
+                STATE.rating = Math.max(10, STATE.rating - 5);
+                playSFX('alert');
+                pushNews(`🚨 [세금 체납 일부압류] 예산 부족으로 세금 일부(-₩${seized.toLocaleString()})만 징수되었습니다.`, "TAX");
+            }
+            updateUI();
+        };
+
+        // 1초마다 공사 타이머 차감 + 복합환승센터 만족도 회복 + 세금/10종 이벤트 트리거
+        setInterval(() => {
+            if (!STATE.mapId || STATE.gameSpeed === 0) return;
+
+            let needMarkerRefresh = false;
+            let hubCount = 0;
+
+            Object.values(STATE.stations).forEach(st => {
+                if (st.hasTransferCenter) hubCount++;
+                if (st.constructingSec && st.constructingSec > 0) {
+                    st.constructingSec = Math.max(0, st.constructingSec - (1 * STATE.gameSpeed));
+                    needMarkerRefresh = true;
+                    if (st.constructingSec <= 0) {
+                        finalizeStationConstruction(st.name);
+                    }
+                }
+            });
+
+            if (needMarkerRefresh) {
+                updateAllStationMarkers();
+                if (STATE.inspectedStation) refreshInspector();
+            }
+
+            // 복합환승센터가 있으면 만족도 서서히 회복
+            if (hubCount > 0 && Math.random() < 0.35) {
+                STATE.rating = Math.min(100, STATE.rating + hubCount);
+                updateUI();
+            }
+
+            // 세금 징수 또는 10종 신규 이벤트 발생
+            if (Math.random() < 0.055 * STATE.gameSpeed) {
+                if (Math.random() < 0.32) {
+                    triggerTaxAuditEvent();
+                } else {
+                    const ev = TEN_NEW_EVENTS[Math.floor(Math.random() * TEN_NEW_EVENTS.length)];
+                    ev.run();
+                    updateAllStationMarkers();
+                    updateUI();
+                }
+            }
+        }, 1000);
+
+        // 메인 메뉴에 새로 추가된 '대한민국 올인원' 카드가 즉시 보이도록 재렌더링
+        renderMainMenu();
+/*************************************************************************
+         * 11. [전국 완전판 노선 확장 패치]
+         * 수도권 누락 노선 12종(경강·경의중앙·우이신설·공항·경춘·서해·수인분당·김포·용인·의정부·인천1·2)
+         * + 대한민국 올인원 = 전국 모든 노선 100% 총집합!
+         *************************************************************************/
+
+        Object.assign(ALL_LINES_DB, {
+            "s_gyeongui": {
+                name: "경의중앙선", badge: "경의", color: "#77C4A3", isLoop: false,
+                stations: buildLineStations(
+                    ["문산","파주","월롱","금촌","금릉","운정","야당","탄현","일산","풍산","백마","곡산","대곡","능곡","행신","강매","화전","수색","디지털미디어시티","가좌","홍대입구","서강대","공덕","효창공원앞","용산","이촌","서빙고","한남","옥수","응봉","왕십리","청량리","회기","중랑","상봉","망우","양원","구리","도농","양정","덕소","도심","팔당","운길산","양수","신원","국수","아신","오빈","양평","원덕","용문","지평"],
+                    [{idx:0,lat:37.854,lng:126.787},{idx:3,lat:37.766,lng:126.774},{idx:8,lat:37.682,lng:126.769},{idx:12,lat:37.631,lng:126.811},{idx:18,lat:37.576,lng:126.900},{idx:20,lat:37.557,lng:126.924},{idx:22,lat:37.544,lng:126.951},{idx:24,lat:37.529,lng:126.964},{idx:25,lat:37.522,lng:126.974},{idx:28,lat:37.540,lng:127.018},{idx:30,lat:37.561,lng:127.037},{idx:31,lat:37.580,lng:127.046},{idx:34,lat:37.596,lng:127.085},{idx:37,lat:37.603,lng:127.143},{idx:42,lat:37.547,lng:127.243},{idx:49,lat:37.492,lng:127.491},{idx:52,lat:37.476,lng:127.629}]
+                )
+            },
+            "s_suinbundang": {
+                name: "수인분당선", badge: "수인", color: "#F5A200", isLoop: false,
+                stations: buildLineStations(
+                    ["청량리","왕십리","서울숲","압구정로데오","강남구청","선정릉","선릉","한티","도곡","구룡","개포동","대모산입구","수서","복정","가천대","태평","모란","야탑","이매","서현","수내","정자","미금","오리","죽전","보정","구성","신갈","기흥","상갈","청명","영통","망포","매탄권선","수원시청","매교","수원","고색","오목천","어천","야목","사리","한대앞","중앙","고잔","초지","안산","신길온천","정왕","오이도","달월","월곶","소래포구","인천논현","호구포","남동인더스파크","원인재","연수","송도","인하대","숭의","신포","인천"],
+                    [{idx:0,lat:37.580,lng:127.046},{idx:1,lat:37.561,lng:127.037},{idx:4,lat:37.517,lng:127.041},{idx:5,lat:37.510,lng:127.043},{idx:6,lat:37.504,lng:127.049},{idx:8,lat:37.488,lng:127.046},{idx:12,lat:37.487,lng:127.101},{idx:13,lat:37.470,lng:127.126},{idx:16,lat:37.432,lng:127.129},{idx:18,lat:37.395,lng:127.128},{idx:21,lat:37.366,lng:127.108},{idx:22,lat:37.350,lng:127.108},{idx:26,lat:37.299,lng:127.105},{idx:28,lat:37.275,lng:127.115},{idx:36,lat:37.266,lng:127.000},{idx:42,lat:37.309,lng:126.853},{idx:45,lat:37.320,lng:126.806},{idx:49,lat:37.362,lng:126.738},{idx:56,lat:37.412,lng:126.687},{idx:62,lat:37.476,lng:126.616}]
+                )
+            },
+            "s_gyeongchun": {
+                name: "경춘선", badge: "경춘", color: "#0C8E72", isLoop: false,
+                stations: buildLineStations(
+                    ["청량리","회기","중랑","상봉","망우","신내","갈매","별내","퇴계원","사릉","금곡","평내호평","천마산","마석","대성리","청평","상천","가평","굴봉산","백양리","강촌","김유정","남춘천","춘천"],
+                    [{idx:0,lat:37.580,lng:127.046},{idx:3,lat:37.596,lng:127.085},{idx:5,lat:37.612,lng:127.103},{idx:7,lat:37.642,lng:127.126},{idx:11,lat:37.653,lng:127.244},{idx:15,lat:37.735,lng:127.426},{idx:17,lat:37.814,lng:127.510},{idx:23,lat:37.885,lng:127.717}]
+                )
+            },
+            "s_arex": {
+                name: "공항철도", badge: "공항", color: "#0090D2", isLoop: false,
+                stations: buildLineStations(
+                    ["서울역","공덕","홍대입구","디지털미디어시티","마곡나루","김포공항","계양","검암","청라국제도시","영종","운서","공항화물청사","인천공항1터미널","인천공항2터미널"],
+                    [{idx:0,lat:37.555,lng:126.972},{idx:1,lat:37.544,lng:126.951},{idx:2,lat:37.557,lng:126.924},{idx:3,lat:37.576,lng:126.900},{idx:4,lat:37.567,lng:126.829},{idx:5,lat:37.562,lng:126.801},{idx:6,lat:37.571,lng:126.736},{idx:7,lat:37.569,lng:126.673},{idx:10,lat:37.492,lng:126.493},{idx:12,lat:37.447,lng:126.452},{idx:13,lat:37.468,lng:126.433}]
+                )
+            },
+            "s_gyeonggang": {
+                name: "경강선", badge: "경강", color: "#003DA5", isLoop: false,
+                stations: buildLineStations(
+                    ["판교","성남","이매","삼동","경기광주","초월","곤지암","신둔도예촌","이천","부발","세종대왕릉","여주"],
+                    [{idx:0,lat:37.394,lng:127.111},{idx:1,lat:37.394,lng:127.126},{idx:2,lat:37.395,lng:127.128},{idx:4,lat:37.397,lng:127.252},{idx:6,lat:37.351,lng:127.346},{idx:8,lat:37.265,lng:127.442},{idx:11,lat:37.282,lng:127.628}]
+                )
+            },
+            "s_seohae": {
+                name: "서해선", badge: "서해", color: "#81A914", isLoop: false,
+                stations: buildLineStations(
+                    ["일산","풍산","백마","곡산","대곡","능곡","김포공항","원종","부천종합운동장","소사","소새울","시흥대야","신천","신현","시흥시청","시흥능곡","달미","선부","초지","시우","원시"],
+                    [{idx:0,lat:37.682,lng:126.769},{idx:4,lat:37.631,lng:126.811},{idx:6,lat:37.562,lng:126.801},{idx:8,lat:37.505,lng:126.797},{idx:9,lat:37.482,lng:126.795},{idx:14,lat:37.381,lng:126.803},{idx:18,lat:37.320,lng:126.806},{idx:20,lat:37.302,lng:126.787}]
+                )
+            },
+            "s_uisinseol": {
+                name: "우이신설선", badge: "우이", color: "#B0CE18", isLoop: false,
+                stations: buildLineStations(
+                    ["북한산우이","솔밭공원","4·19민주묘지","가오리","화계","삼양","삼양사거리","솔샘","북한산보국문","정릉","성신여대입구","보문","신설동"],
+                    [{idx:0,lat:37.663,lng:127.012},{idx:5,lat:37.626,lng:127.018},{idx:10,lat:37.592,lng:127.016},{idx:11,lat:37.585,lng:127.019},{idx:12,lat:37.575,lng:127.024}]
+                )
+            },
+            "s_gimpo": {
+                name: "김포골드라인", badge: "김포", color: "#A17800", isLoop: false,
+                stations: buildLineStations(
+                    ["양촌","구래","마산","장기","운양","걸포북변","사우","풍무","고촌","김포공항"],
+                    [{idx:0,lat:37.642,lng:126.615},{idx:3,lat:37.644,lng:126.669},{idx:6,lat:37.620,lng:126.719},{idx:8,lat:37.601,lng:126.770},{idx:9,lat:37.562,lng:126.801}]
+                )
+            },
+            "s_everline": {
+                name: "용인에버라인", badge: "용인", color: "#509F22", isLoop: false,
+                stations: buildLineStations(
+                    ["기흥","강남대","지석","어정","동백","초당","삼가","시청·용인대","명지대","김량장","운동장·송담대","고진","보평","둔전","전대·에버랜드"],
+                    [{idx:0,lat:37.275,lng:127.115},{idx:4,lat:37.269,lng:127.152},{idx:7,lat:37.239,lng:127.178},{idx:9,lat:37.237,lng:127.198},{idx:14,lat:37.285,lng:127.219}]
+                )
+            },
+            "s_uijeongbu": {
+                name: "의정부경전철", badge: "의정부", color: "#FDA600", isLoop: false,
+                stations: buildLineStations(
+                    ["발곡","회룡","범골","경전철의정부","의정부시청","흥선","의정부중앙","동오","새말","경기도청북부청사","효자","곤제","어룡","송산","탑석"],
+                    [{idx:0,lat:37.713,lng:127.047},{idx:1,lat:37.724,lng:127.047},{idx:4,lat:37.739,lng:127.035},{idx:9,lat:37.751,lng:127.077},{idx:14,lat:37.733,lng:127.088}]
+                )
+            },
+            "in_1": {
+                name: "인천 1호선", badge: "인천1", color: "#7CA8D5", isLoop: false,
+                stations: buildLineStations(
+                    ["계양","귤현","박촌","임학","계산","경인교대입구","작전","갈산","부평구청","부평시장","부평","동수","부평삼거리","간석오거리","인천시청","예술회관","인천터미널","문학경기장","선학","신연수","원인재","동춘","동막","캠퍼스타운","테크노파크","지식정보단지","인천대입구","센트럴파크","국제업무지구","송도달빛축제공원"],
+                    [{idx:0,lat:37.571,lng:126.736},{idx:8,lat:37.508,lng:126.720},{idx:10,lat:37.489,lng:126.724},{idx:14,lat:37.456,lng:126.702},{idx:20,lat:37.412,lng:126.687},{idx:29,lat:37.407,lng:126.626}]
+                )
+            },
+            "in_2": {
+                name: "인천 2호선", badge: "인천2", color: "#ED8B00", isLoop: false,
+                stations: buildLineStations(
+                    ["검단오류","왕길","검단사거리","마전","완정","독정","검암","검바위","아시아드경기장","서구청","가정","가정중앙시장","석남","서부여성회관","인천가좌","가재울","주안국가산단","주안","시민공원","석바위시장","인천시청","석천사거리","모래내시장","만수","남동구청","인천대공원","운연"],
+                    [{idx:0,lat:37.595,lng:126.628},{idx:6,lat:37.569,lng:126.673},{idx:12,lat:37.506,lng:126.676},{idx:17,lat:37.465,lng:126.680},{idx:20,lat:37.456,lng:126.702},{idx:26,lat:37.438,lng:126.759}]
+                )
+            }
+        });
+
+        // 1) '서울 올인원'에 수도권 23개 전 노선 완벽 탑재!
+        GAME_MAPS.seoul_all.lineKeys = [
+            "s_1", "s_2", "s_3", "s_4", "s_5", "s_6", "s_7", "s_8", "s_9",
+            "s_sinbundang", "s_suinbundang", "s_gyeongui", "s_gyeongchun", "s_arex",
+            "s_gyeonggang", "s_seohae", "s_uisinseol", "s_sillim", "s_gimpo",
+            "s_everline", "s_uijeongbu", "in_1", "in_2", "gtx_a"
+        ];
+        GAME_MAPS.seoul_all.subtitle = "1~9호선 · 신분당 · 수인분당 · 경의중앙 · 경춘 · 공항 · 경강 · 서해 · 우이 · 신림 · 김포 · 에버 · 의정부 · 인천1·2 · GTX-A (24개 전 노선)";
+
+        // 2) '대한민국 올인원'에 전국의 모든 호선(ALL_LINES_DB 전체 36개 노선!) 100% 탑재!
+        GAME_MAPS.korea_national.lineKeys = Object.keys(ALL_LINES_DB);
+        GAME_MAPS.korea_national.subtitle = `대한민국에 존재하는 모든 지하철·광역전철·경전철·KTX·GTX (${Object.keys(ALL_LINES_DB).length}개 전 노선 100% 수록)`;
+
+        // 카드의 노선 배지가 많을 때 줄바꿈(flex-wrap)으로 예쁘게 표시되도록 메인 메뉴 렌더러 보강
+        const _origRenderMainMenu = renderMainMenu;
+        renderMainMenu = function() {
+            _origRenderMainMenu();
+            document.querySelectorAll('#menu-categories .flex.rounded-sm.overflow-hidden').forEach(el => {
+                el.classList.add('flex-wrap', 'max-w-[240px]', 'justify-end', 'gap-0.5');
+            });
+        };
+
+        renderMainMenu();
+/*************************************************************************
+         * 12. [결정판 패치]
+         * 1) 나무위키 기준 광주 2호선 44개 전 역 정확한 좌표 재구축 + 전국 동명이역(시청·교대 등) 완벽 분리
+         * 2) 혼잡 역 실시간 경보음 & 클릭 시 카메라 즉시 이동 배너
+         * 3) 게임오버 시 혼잡 역으로 카메라 줌인(FlyTo) 후 기깔나는 시네마틱 결과창 연출
+         *************************************************************************/
+
+        // [1] 나무위키 실제 노선도 기반 광주 2호선(순환선 1·2단계 44개 역) 정확한 좌표 재구축!
+        ALL_LINES_DB["gj_2"] = {
+            name: "광주 2호선", badge: "2", color: "#0052A4", isLoop: true,
+            stations: buildLineStations(
+                [
+                    "시청","상무","금호","풍암","원광대병원","월드컵경기장","풍암호수","백운광장","봉선","방림",
+                    "남광주","조선대","법원","두암","교육대","전남대","광주역","운암","양산","본촌",
+                    "일곡","삼각","오치","전남대후문","매곡","공구단지","무등경기장","신안","유동","양동",
+                    "발산","서구청","치평","유스퀘어","버들","유덕","운남","신가","신창","수완",
+                    "하남","월곡","산정","장수"
+                ],
+                [
+                    {idx: 0, lat: 35.159, lng: 126.851},  // 시청
+                    {idx: 1, lat: 35.147, lng: 126.849},  // 상무
+                    {idx: 2, lat: 35.132, lng: 126.855},  // 금호
+                    {idx: 5, lat: 35.133, lng: 126.879},  // 월드컵경기장
+                    {idx: 7, lat: 35.132, lng: 126.903},  // 백운광장
+                    {idx: 8, lat: 35.125, lng: 126.912},  // 봉선
+                    {idx: 10, lat: 35.139, lng: 126.921}, // 남광주 (광주1호선 환승)
+                    {idx: 11, lat: 35.145, lng: 126.931}, // 조선대
+                    {idx: 13, lat: 35.166, lng: 126.932}, // 두암
+                    {idx: 15, lat: 35.174, lng: 126.912}, // 전남대
+                    {idx: 16, lat: 35.165, lng: 126.909}, // 광주역
+                    {idx: 17, lat: 35.178, lng: 126.879}, // 운암
+                    {idx: 20, lat: 35.205, lng: 126.898}, // 일곡
+                    {idx: 22, lat: 35.191, lng: 126.904}, // 오치
+                    {idx: 29, lat: 35.154, lng: 126.902}, // 양동
+                    {idx: 33, lat: 35.160, lng: 126.879}, // 유스퀘어
+                    {idx: 36, lat: 35.176, lng: 126.824}, // 운남
+                    {idx: 39, lat: 35.190, lng: 126.830}, // 수완
+                    {idx: 41, lat: 35.166, lng: 126.809}, // 월곡
+                    {idx: 43, lat: 35.162, lng: 126.835}  // 장수 -> 시청 순환
+                ]
+            )
+        };
+
+        // [2] 전국 동명이역(서울 시청 vs 광주 시청 vs 부산 시청 등) 자동 지리 분리 엔진!
+        // 같은 이름의 역이라도 위도/경도가 0.15도(약 15km) 이상 떨어져 있으면 다른 도시의 역이므로 고유 역명을 부여합니다.
+        (function separateDuplicateStationNamesAcrossCities() {
+            const firstSeenCoords = {}; // stationName -> { lat, lng, linePrefix }
+            const cityLabelMap = {
+                "s_": "서울", "in_": "인천", "gtx_": "수도권",
+                "b_": "부산", "dg_": "대구", "gj_": "광주", "dj_": "대전", "ktx_": "KTX"
+            };
+
+            Object.entries(ALL_LINES_DB).forEach(([lineId, lineObj]) => {
+                const prefix = Object.keys(cityLabelMap).find(p => lineId.startsWith(p)) || "s_";
+                const cityTag = cityLabelMap[prefix];
+
+                lineObj.stations.forEach(st => {
+                    const baseName = st.name.replace(/\s*\(.*\)$/, ''); // 기존 괄호 제거
+                    if (!firstSeenCoords[baseName]) {
+                        firstSeenCoords[baseName] = [{ lat: st.lat, lng: st.lng, assignedName: baseName }];
+                        st.name = baseName;
+                    } else {
+                        // 기존에 등장한 동명이역 중 반경 15km(0.15도) 이내에 있는 같은 도시 역인지 확인
+                        const match = firstSeenCoords[baseName].find(item =>
+                            Math.hypot(item.lat - st.lat, item.lng - st.lng) < 0.15
+                        );
+                        if (match) {
+                            // 같은 도시에 있는 환승역(예: KTX 서울역 & 1호선 서울역, 광주 1·2호선 남광주역) -> 이름 통일!
+                            st.name = match.assignedName;
+                        } else {
+                            // 다른 도시에 있는 동명이역(예: 서울 시청 vs 광주 시청 vs 대전 시청) -> 도시 태그 부착!
+                            const newUniqueName = `${baseName}(${cityTag})`;
+                            firstSeenCoords[baseName].push({ lat: st.lat, lng: st.lng, assignedName: newUniqueName });
+                            st.name = newUniqueName;
+                        }
+                    }
+                });
+            });
+        })();
+
+        // [3] 혼잡 위험 역 실시간 경보 배너 & 시네마틱 게임오버 모달 UI 동적 주입
+        (function injectAlertAndGameOverUI() {
+            // 혼잡 경보 배너 (화면 상단 중앙에 플로팅)
+            const alertBanner = document.createElement('div');
+            alertBanner.id = 'congestion-alert-banner';
+            alertBanner.className = 'fixed top-20 left-1/2 -translate-x-1/2 z-[2200] hidden cursor-pointer bg-rose-600 hover:bg-rose-500 text-white px-5 py-2.5 rounded-full shadow-2xl border-2 border-rose-200 font-black text-xs items-center gap-2.5 animate-bounce transition';
+            alertBanner.innerHTML = `
+                <i class="fas fa-exclamation-triangle text-amber-300 text-sm"></i>
+                <span id="congestion-alert-text">🚨 [혼잡 경보] 역 승강장 포화 임박! (클릭하여 즉시 이동)</span>
+                <span class="px-2 py-0.5 bg-black/30 rounded-full text-[10px]">카메라 이동 <i class="fas fa-crosshairs"></i></span>
+            `;
+            document.body.appendChild(alertBanner);
+
+            // 시네마틱 게임오버 모달
+            const goModal = document.createElement('div');
+            goModal.id = 'cinematic-gameover-modal';
+            goModal.className = 'fixed inset-0 bg-black/75 backdrop-blur-md z-[4000] hidden items-center justify-center p-4 transition-opacity duration-500';
+            goModal.innerHTML = `
+                <div class="bg-zinc-900 text-white border-2 border-rose-500/80 rounded-3xl max-w-lg w-full p-7 shadow-[0_0_50px_rgba(244,63,94,0.4)] flex flex-col gap-5 text-center relative overflow-hidden">
+                    <div class="w-16 h-16 rounded-2xl bg-rose-500/20 border border-rose-500/50 text-rose-400 flex items-center justify-center mx-auto text-3xl animate-pulse">
+                        <i class="fas fa-skull-crossbones"></i>
+                    </div>
+                    <div>
+                        <span class="px-3 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black tracking-widest uppercase">METRO SYSTEM COLLAPSED</span>
+                        <h2 class="text-2xl md:text-3xl font-black mt-2 text-white">도시철도 본부장 해임 통지서</h2>
+                        <p id="go-reason" class="text-xs text-rose-300 font-semibold mt-1.5"></p>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2.5 bg-zinc-950/90 p-4 rounded-2xl border border-zinc-800">
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">총 운영 일수</div>
+                            <div id="go-days" class="text-lg font-black text-amber-400 mt-0.5">Day 1</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">누적 수송 승객</div>
+                            <div id="go-passengers" class="text-lg font-black text-emerald-400 mt-0.5">0명</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-zinc-400 font-bold">개통한 역 수</div>
+                            <div id="go-stations" class="text-lg font-black text-indigo-400 mt-0.5">0개</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-zinc-800/60 rounded-xl p-3 text-left text-xs text-zinc-300 border border-zinc-700/70">
+                        <div class="font-extrabold text-amber-300 mb-1"><i class="fas fa-clipboard-check mr-1"></i> 감사원 종합 평가</div>
+                        <p id="go-eval" class="leading-relaxed text-[11px]"></p>
+                    </div>
+
+                    <div class="flex gap-3 mt-1">
+                        <button onclick="closeGameOverAndRestart()" class="flex-1 py-3.5 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black text-sm shadow-lg transition">
+                            <i class="fas fa-redo mr-1.5"></i> 이 도시 다시 도전하기
+                        </button>
+                        <button onclick="closeGameOverToMenu()" class="flex-1 py-3.5 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-extrabold text-sm border border-zinc-700 transition">
+                            <i class="fas fa-th-large mr-1.5"></i> 메인 메뉴로
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(goModal);
+        })();
+
+        // 혼잡 경보 사운드 (삐-삐- 위급 사이렌 신디사이저)
+        function playDangerSiren() {
+            if (!soundEnabled || !audioCtx) return;
+            playTone(880, 'sawtooth', 0.18, 0.08, 0);
+            playTone(659.25, 'sawtooth', 0.22, 0.08, 0.2);
+        }
+
+        // 1.5초마다 과밀 위험 역 감시 -> 경보 배너 표시 및 사운드 재생
+        let lastWarnedStation = null;
+        setInterval(() => {
+            if (!STATE.mapId || STATE.gameSpeed === 0 || STATE.isGameOverAnimating) return;
+
+            const dangerStations = Object.values(STATE.stations)
+                .filter(s => s.activeLines.length > 0 && s.waiting >= s.maxCap * 0.8)
+                .sort((a, b) => (b.waiting / b.maxCap) - (a.waiting / a.maxCap));
+
+            const banner = document.getElementById('congestion-alert-banner');
+            if (dangerStations.length > 0) {
+                const worst = dangerStations[0];
+                const pct = Math.round((worst.waiting / worst.maxCap) * 100);
+                document.getElementById('congestion-alert-text').innerText =
+                    `🚨 [비상 경보] '${worst.name}역' 승강장 혼잡도 ${pct}% (${worst.waiting}/${worst.maxCap}명)! 클릭하여 이동`;
+
+                banner.classList.remove('hidden');
+                banner.classList.add('flex');
+                banner.onclick = () => {
+                    map.flyTo([worst.lat, worst.lng], 15, { duration: 0.8 });
+                    openInspector(worst.name);
+                };
+
+                // 새로운 위험 역이거나 4초마다 경보음 재생
+                if (lastWarnedStation !== worst.name || Math.random() < 0.35) {
+                    lastWarnedStation = worst.name;
+                    playDangerSiren();
+                }
+            } else {
+                banner.classList.add('hidden');
+                banner.classList.remove('flex');
+                lastWarnedStation = null;
+            }
+        }, 1500);
+
+        // [4] 게임오버 시 사고 역으로 카메라 줌인(FlyTo) + 충격파 애니메이션 + 시네마틱 모달 연출!
+        handleGameOver = function(stationName) {
+            if (STATE.isGameOverAnimating) return;
+            STATE.isGameOverAnimating = true;
+            setGameSpeed(0);
+
+            document.getElementById('congestion-alert-banner').classList.add('hidden');
+            const st = STATE.stations[stationName];
+
+            // 처절한 게임오버 다운톤 화음 재생
+            if (soundEnabled && audioCtx) {
+                playTone(440, 'sawtooth', 0.4, 0.12, 0);
+                playTone(392, 'sawtooth', 0.4, 0.12, 0.35);
+                playTone(349.23, 'sawtooth', 0.4, 0.12, 0.7);
+                playTone(261.63, 'sawtooth', 0.9, 0.15, 1.05);
+            }
+
+            // 1단계: 사고가 발생한 역으로 카메라가 극적으로 줌인!
+            if (st && map) {
+                map.flyTo([st.lat, st.lng], 16, { animate: true, duration: 1.6 });
+
+                // 사고 역 위에 붉은 충격파 원형 이펙트 표시
+                L.circleMarker([st.lat, st.lng], {
+                    radius: 45,
+                    color: '#ef4444',
+                    weight: 4,
+                    fillColor: '#ef4444',
+                    fillOpacity: 0.35
+                }).addTo(map).bindTooltip(`💥 [${st.name}역] 승강장 마비 사고 발생!`, {
+                    permanent: true,
+                    direction: 'top',
+                    className: 'station-label-built'
+                });
+            }
+
+            pushNews(`💥 [긴급 속보] '${stationName}역' 승강장 인파 과밀로 안전사고 경보 발령! 본부장 해임 결정!`, "COLLAPSE");
+
+            // 2단계: 줌인 연출을 1.8초간 감상한 뒤 기깔나는 해임 통지서 모달 팝업!
+            setTimeout(() => {
+                const activeStCount = Object.values(STATE.stations).filter(s => s.activeLines.length > 0).length;
+                document.getElementById('go-reason').innerText =
+                    `'${stationName}역'의 승강장 정원 초과가 장시간 방치되어 대규모 운행 마비 사태가 발생했습니다.`;
+                document.getElementById('go-days').innerText = `Day ${STATE.day}`;
+                document.getElementById('go-passengers').innerText = `${STATE.totalPassengers.toLocaleString()}명`;
+                document.getElementById('go-stations').innerText = `${activeStCount}개 역`;
+
+                let evalText = "초기 노선망 구축 단계에서 승객 수요 예측에 실패했습니다. 환승역 증축과 전세버스 투입을 적극 활용하세요.";
+                if (STATE.totalPassengers >= 5000) {
+                    evalText = "전설적인 도시철도 본부장이셨습니다! 수많은 시민을 수송하며 거대한 광역 철도망을 훌륭히 일궈냈습니다.";
+                } else if (STATE.totalPassengers >= 1500) {
+                    evalText = "안정적인 중견 철도망을 운영하셨으나, 러시아워와 축제 인파가 겹친 핵심 환승역의 병목 현상을 버티지 못했습니다.";
+                }
+                document.getElementById('go-eval').innerText = evalText;
+
+                const modal = document.getElementById('cinematic-gameover-modal');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            }, 1850);
+        };
+
+        function closeGameOverAndRestart() {
+            const modal = document.getElementById('cinematic-gameover-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            STATE.isGameOverAnimating = false;
+            startGame(STATE.mapId, null);
+        }
+
+        function closeGameOverToMenu() {
+            const modal = document.getElementById('cinematic-gameover-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            STATE.isGameOverAnimating = false;
+            returnToMainMenu();
+        }
+
+        // 메인 메뉴 노선도 프리뷰에 수정된 광주2호선 좌표 반영
+        renderMainMenu();
+    </script>
+</body>
+</html>
