@@ -1405,6 +1405,127 @@
             renderMainMenu();
             requestAnimationFrame(gameTick);
         });
+        /*************************************************************************
+         * [초기 시작 브리핑 & 조작방법 / 종합관제실 가이드 팝업 시스템]
+         *************************************************************************/
+        (function injectTutorialGuideModal() {
+            // 1) 우측 상단 컨트롤바에 언제든 다시 볼 수 있는 [❓ 도움말] 버튼 추가
+            const topBar = document.querySelector('button[onclick="openHQModal()"]')?.parentElement;
+            if (topBar) {
+                const helpBtn = document.createElement('button');
+                helpBtn.onclick = () => openTutorialModal();
+                helpBtn.className = "px-2.5 h-8 rounded-xl bg-amber-400 hover:bg-amber-300 text-zinc-900 text-[11px] font-black flex items-center gap-1 shadow-sm transition";
+                helpBtn.innerHTML = `<i class="fas fa-question-circle"></i> 게임방법`;
+                topBar.insertBefore(helpBtn, topBar.firstChild);
+            }
+
+            // 2) 본부장 취임 브리핑 & 조작법 가이드 모달 생성
+            const guideModal = document.createElement('div');
+            guideModal.id = 'tutorial-guide-modal';
+            guideModal.className = 'fixed inset-0 bg-black/75 backdrop-blur-md z-[4200] hidden items-center justify-center p-4';
+            guideModal.innerHTML = `
+                <div class="bg-[#FAF8F5] text-zinc-900 rounded-3xl max-w-2xl w-full p-6 md:p-8 shadow-2xl border-2 border-zinc-300 flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+                    <div class="flex justify-between items-start border-b border-zinc-200 pb-4">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 rounded-2xl bg-zinc-900 text-amber-400 flex items-center justify-center text-2xl font-black shadow-md">
+                                <i class="fas fa-subway"></i>
+                            </div>
+                            <div>
+                                <span class="px-2.5 py-0.5 rounded-full bg-indigo-600 text-white text-[10px] font-black uppercase tracking-wider">DIRECTOR BRIEFING</span>
+                                <h2 id="tut-city-title" class="text-2xl font-black mt-0.5">도시철도 본부장 취임 브리핑</h2>
+                            </div>
+                        </div>
+                        <button onclick="closeTutorialModal()" class="w-8 h-8 rounded-full bg-zinc-200 hover:bg-zinc-300 flex items-center justify-center text-zinc-600"><i class="fas fa-times"></i></button>
+                    </div>
+
+                    <!-- 최종 승리 목표 배너 -->
+                    <div class="bg-gradient-to-r from-indigo-900 to-zinc-900 text-white p-4 rounded-2xl shadow-lg flex items-center gap-4">
+                        <div class="text-3xl text-amber-400 shrink-0"><i class="fas fa-trophy"></i></div>
+                        <div>
+                            <div class="text-[11px] font-extrabold text-amber-300 uppercase">최종 승리 조건 (VICTORY GOAL)</div>
+                            <div id="tut-goal-text" class="text-sm md:text-base font-black mt-0.5">이 도시의 모든 노선과 모든 역을 100% 연결하여 개통하세요!</div>
+                            <div class="text-[11px] text-zinc-300 mt-0.5">※ 단, 역에 승객이 가득 차서 방치되거나 시민 만족도가 0%가 되면 즉시 해임(Game Over)됩니다!</div>
+                        </div>
+                    </div>
+
+                    <!-- 핵심 조작법 & 시스템 안내 그리드 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5 text-xs">
+                        <div class="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm flex flex-col gap-1.5">
+                            <div class="font-black text-sm text-indigo-700 flex items-center gap-1.5">
+                                <i class="fas fa-route"></i> 1. 첫 노선 개통 및 이웃역 확장
+                            </div>
+                            <p class="text-zinc-600 leading-relaxed">
+                                • 좌측 하단에서 노선을 고른 뒤, 지도에 있는 <strong>연속된 두 역</strong>을 클릭하면 첫 구간이 개통되며 열차 1대가 무료 투입됩니다.<br>
+                                • 이후 양끝의 <strong>노란색으로 깜빡이는 인접 역</strong>만 클릭하여 연장 공사(15초 소요)를 진행할 수 있습니다.
+                            </p>
+                        </div>
+
+                        <div class="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm flex flex-col gap-1.5">
+                            <div class="font-black text-sm text-emerald-700 flex items-center gap-1.5">
+                                <i class="fas fa-building"></i> 2. 역 관리 & 환승센터 & 차량기지
+                            </div>
+                            <p class="text-zinc-600 leading-relaxed">
+                                • 개통된 역을 클릭해 <strong>승강장 증축, 지하상가·광고판(일일 고정수익)</strong>을 건설하세요.<br>
+                                • 2개 노선이 만나는 <strong>환승역</strong>에는 <strong>복합환승센터·엘리베이터</strong>를 지을 수 있고, 노선 <strong>종점</strong>을 뚫으면 해당 노선 비용이 <strong>30% 영구 할인</strong>됩니다!
+                            </p>
+                        </div>
+
+                        <div class="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm flex flex-col gap-1.5">
+                            <div class="font-black text-sm text-purple-700 flex items-center gap-1.5">
+                                <i class="fas fa-chart-pie"></i> 3. 종합관제실 & 특수 지령 활용
+                            </div>
+                            <p class="text-zinc-600 leading-relaxed">
+                                • 우측 상단 <strong>[📊 종합관제실]</strong>에서 급전이 필요할 때 <strong>채권 발행(+₩5,000 대출)</strong>, <strong>심야 올빼미 전철</strong>, <strong>AI 스마트관제</strong>, <strong>업적 도감</strong>을 관리하세요.<br>
+                                • <strong>[🔥 히트맵]</strong>을 켜면 막히는 역을 한눈에 볼 수 있습니다.
+                            </p>
+                        </div>
+
+                        <div class="bg-white p-4 rounded-2xl border border-zinc-200 shadow-sm flex flex-col gap-1.5">
+                            <div class="font-black text-sm text-rose-700 flex items-center gap-1.5">
+                                <i class="fas fa-tools"></i> 4. 열차 전략 & 고장 수리·카메라
+                            </div>
+                            <p class="text-zinc-600 leading-relaxed">
+                                • 좌측 하단에서 <strong>급행 운행(한산한 역 통과)</strong>, <strong>구간 회차</strong>, <strong>열차 타 노선 무료 이동</strong>이 가능합니다.<br>
+                                • 달리는 열차를 클릭하면 <strong>기관사 추적 카메라</strong>가 켜지며, <strong>🔧고장 난 열차</strong>는 직접 클릭해 즉시 수리하세요!
+                            </p>
+                        </div>
+                    </div>
+
+                    <button onclick="closeTutorialModal()" class="w-full py-4 rounded-2xl bg-zinc-900 hover:bg-indigo-600 text-white font-black text-sm shadow-xl transition flex items-center justify-center gap-2">
+                        <span>숙지 완료! 도시철도 관제 업무 시작하기</span>
+                        <i class="fas fa-arrow-right text-amber-400"></i>
+                    </button>
+                </div>
+            `;
+            document.body.appendChild(guideModal);
+        })();
+
+        function openTutorialModal() {
+            setGameSpeed(0);
+            if (STATE.mapId && GAME_MAPS[STATE.mapId]) {
+                const cfg = GAME_MAPS[STATE.mapId];
+                const totL = Object.keys(STATE.lines).length;
+                const totS = Object.keys(STATE.stations).length;
+                document.getElementById('tut-city-title').innerText = `[${cfg.title}] 본부장 취임 및 작전 브리핑`;
+                document.getElementById('tut-goal-text').innerText =
+                    `${cfg.title}의 모든 노선(${totL}개)과 모든 역(${totS}개)을 100% 연결하여 개통하세요!`;
+            }
+            toggleModal('tutorial-guide-modal', true);
+        }
+
+        function closeTutorialModal() {
+            toggleModal('tutorial-guide-modal', false);
+            setGameSpeed(1);
+        }
+
+        // 새 게임을 시작할 때마다 자동으로 브리핑 & 조작법 가이드 창을 띄움!
+        const _origStartGameForTut = startGame;
+        startGame = function(mapId, savedState = null, slotNum = 1) {
+            _origStartGameForTut(mapId, savedState, slotNum);
+            if (!savedState) {
+                setTimeout(() => openTutorialModal(), 250);
+            }
+        };
     </script>
 </body>
 </html>
