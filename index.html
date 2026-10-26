@@ -848,26 +848,51 @@
             trainMarkers[tr.id] = m;
         }
 
-        function buildTrainIcon(tr, line) {
-            if (tr.isBroken) return L.divIcon({ className: '', html: `<div class="train-node danger" style="width:32px;height:18px;background:#dc2626;">🔧고장</div>`, iconSize: [32, 18], iconAnchor: [16, 9] });
+function buildTrainIcon(tr, line) {
+            // setIcon 갱신 시에도 클릭이 절대 안 씹히도록 onclick 직접 바인딩 + 이벤트 전파 차단(stopPropagation)
+            if (tr.isBroken) {
+                return L.divIcon({
+                    className: '',
+                    html: `<div onclick="event.stopPropagation(); onTrainClicked('${tr.id}')" class="train-node danger" style="width:42px;height:22px;background:#dc2626;border:2px solid #fef08a;font-size:10px;z-index:9999;cursor:pointer;pointer-events:auto;">🔧수리</div>`,
+                    iconSize: [42, 22],
+                    iconAnchor: [21, 11]
+                });
+            }
             const cls = ['train-node'];
             if (tr.stopTimer > 0) cls.push('stopped');
             if (tr.isVip) cls.push('vip');
-            return L.divIcon({ className: '', html: `<div class="${cls.join(' ')}" style="width:24px;height:15px;background:${line.color};">${tr.passengers}</div>`, iconSize: [24, 15], iconAnchor: [12, 7.5] });
+            return L.divIcon({
+                className: '',
+                html: `<div onclick="event.stopPropagation(); onTrainClicked('${tr.id}')" class="${cls.join(' ')}" style="width:24px;height:15px;background:${line.color};cursor:pointer;pointer-events:auto;">${tr.passengers}</div>`,
+                iconSize: [24, 15],
+                iconAnchor: [12, 7.5]
+            });
         }
 
         function onTrainClicked(id) {
             const tr = STATE.trains.find(t => t.id === id);
             if (!tr) return;
+            const line = STATE.lines[tr.lineId];
             if (tr.isBroken) {
-                tr.isBroken = false; tr.stopTimer = 0; playSFX('build');
-                pushNews(`🔧 [${STATE.lines[tr.lineId].name}] 고장 열차 현장 수리 완료!`, "REPAIR");
+                tr.isBroken = false;
+                tr.stopTimer = 0;
+                if (trainMarkers[tr.id]) trainMarkers[tr.id].setIcon(buildTrainIcon(tr, line));
+                playSFX('build');
+                pushNews(`🔧 [${line.name}] 고장 전동차 응급 수리 완료! 정상 운행을 재개합니다.`, "REPAIR");
                 return;
             }
             followedTrainId = tr.id;
             toggleModal('follow-cam-banner', true);
             playSFX('coin');
         }
+
+        // 혹시 고장 난 열차가 서 있는 '역'을 클릭했을 때도 함께 수리되도록 편의성 추가!
+        const _origOpenInspectorRepair = openInspector;
+        openInspector = function(stName) {
+            const brokenAtStation = STATE.trains.filter(t => t.isBroken && STATE.lines[t.lineId].allStations[STATE.lines[t.lineId].activeIndices[t.stepIndex]] === stName);
+            brokenAtStation.forEach(t => onTrainClicked(t.id));
+            _origOpenInspectorRepair(stName);
+        };
 
         function stopFollowCam() { followedTrainId = null; toggleModal('follow-cam-banner', false); }
         function getTrainCap(line) { return 25 + (line.capLv - 1) * 15; }
